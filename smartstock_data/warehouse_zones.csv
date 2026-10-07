@@ -1,0 +1,6 @@
+warehouse_id,zone_id,zone_name,storage_type,capacity_m2,fixed_occupied_m2_aisles_equipment,reserved_buffer_m2,rent_allowed,notes
+WH-01,Z1,"General Storage (packaging, lab, safety gear)",ambient,4000,540.0,500,yes,"general goods only (no raw materials, no chemicals)"
+WH-01,Z2,Raw Materials - Dry,ambient,2500,305.9,200,no,dried shells and process inputs - not for rent (contamination risk)
+WH-01,Z3,Cold Storage,cold,1000,144.0,0,no,cold storage for fresh/frozen shells - not for rent
+WH-01,Z4,Hazardous Materials,hazardous,500,54.0,0,no,"acids and alkalis, regulated - never for rent"
+WH-01,Z5,Overflow / Bulk,ambient,2000,126.0,400,yes,"general goods only (no raw materials, no chemicals)"

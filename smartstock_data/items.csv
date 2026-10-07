@@ -1,0 +1,25 @@
+item_id,name_en,name_ar,category,storage_type,zone_id,unit,unit_cost_omr,supplier_id,lead_time_days,safety_stock,shelf_life_days,space_m2_per_unit,criticality
+SKU-001,Dried shrimp shells (kg),قشور الروبيان المجففة,Raw material,ambient,Z2,kg,0.35,SUP-01,7,300,365,0.3739,A
+SKU-002,Frozen shrimp shells (kg),قشور الروبيان المجمدة,Raw material,cold,Z3,kg,0.25,SUP-01,5,250,180,0.7387,A
+SKU-003,Chilled crab shells (kg),قشور السلطعون المبردة,Raw material,cold,Z3,kg,0.3,SUP-02,5,100,14,0.7387,A
+SKU-004,Dried crab shells (kg),قشور السلطعون المجففة,Raw material,ambient,Z2,kg,0.4,SUP-02,7,150,365,0.3739,A
+SKU-005,Dried lobster shells (kg),قشور الكركند المجففة,Raw material,ambient,Z2,kg,0.5,SUP-02,10,40,365,0.3739,B
+SKU-006,Hydrochloric acid 37% (20L carboy),حمض الهيدروكلوريك 37%,Chemicals,hazardous,Z4,carboy,18.0,SUP-03,14,10,730,2.2296,A
+SKU-007,Sodium hydroxide pellets (25kg bag),هيدروكسيد الصوديوم,Chemicals,hazardous,Z4,bag,22.0,SUP-03,14,8,1095,1.858,A
+SKU-008,Glacial acetic acid (5L),حمض الأسيتيك الثلجي,Chemicals,hazardous,Z4,bottle,14.0,SUP-03,14,10,730,2.2296,A
+SKU-009,Sodium hypochlorite 5% (20L),هيبوكلوريت الصوديوم,Chemicals,hazardous,Z4,carboy,6.0,SUP-03,10,6,180,2.2296,B
+SKU-010,Glycerol plasticizer (20kg drum),جلسرين,Raw material,ambient,Z2,drum,40.0,SUP-03,14,4,730,0.6231,B
+SKU-011,Distilled water (20L),ماء مقطر,Consumable,ambient,Z2,jerrycan,1.2,SUP-04,5,150,365,0.3739,A
+SKU-012,pH test strips (box),شرائح قياس الحموضة,Lab consumable,ambient,Z1,box,4.5,SUP-05,10,10,,3.5498,B
+SKU-013,Filter cloth (roll),قماش ترشيح,Lab consumable,ambient,Z1,roll,25.0,SUP-05,10,4,,0.8874,B
+SKU-014,Nitrile gloves (box of 100),قفازات نتريل,Safety gear,ambient,Z1,box,4.0,SUP-05,10,40,,3.5498,A
+SKU-015,Chemical splash goggles,نظارات واقية من الرذاذ الكيميائي,Safety gear,ambient,Z1,piece,3.0,SUP-05,14,20,,5.3247,A
+SKU-016,Respirator masks (box of 20),كمامات تنفسية,Safety gear,ambient,Z1,box,11.0,SUP-05,14,10,,3.5498,A
+SKU-017,Powder pouches 500g (pack of 100),أكياس مسحوق الكيتوزان 500 جم,Packaging,ambient,Z1,pack,12.0,SUP-06,10,40,,5.3247,B
+SKU-018,Edible film sleeves (roll),أكمام تغليف الأغشية الصالحة للأكل,Packaging,ambient,Z1,roll,8.0,SUP-06,10,20,,0.8874,B
+SKU-019,Product labels (box of 12 rolls),ملصقات المنتجات,Packaging,ambient,Z1,box,16.5,SUP-06,10,25,,3.5498,B
+SKU-020,Shipping cartons (bundle of 25),كراتين الشحن,Packaging,ambient,Z1,bundle,9.0,SUP-06,10,60,,6.2121,B
+SKU-021,Spare pH electrodes,أقطاب pH احتياطية,Lab spares,ambient,Z1,piece,65.0,SUP-05,21,2,,5.3247,C
+SKU-022,Lab glassware sets (beakers 2L),طقم زجاجيات مخبرية,Lab spares,ambient,Z1,set,30.0,SUP-05,14,3,,5.3247,C
+SKU-023,Plastic storage drums 200L,براميل تخزين بلاستيكية,Bulk supplies,ambient,Z5,drum,14.0,SUP-04,10,20,,1.1443,C
+SKU-024,Plastic pallets,طبليات بلاستيكية,Bulk supplies,ambient,Z5,pallet,11.0,SUP-04,10,30,,2.7464,C

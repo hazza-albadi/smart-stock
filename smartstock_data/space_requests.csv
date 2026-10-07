@@ -1,0 +1,6 @@
+request_id,company,required_storage_type,area_needed_m2,duration_months,needed_from,notes
+REQ-01,Al Noor Trading,general,600,6,2026-11-01,Needs ambient space for packaged goods
+REQ-02,Muscat Fresh Foods,cold,400,4,2026-10-20,Needs temperature-controlled space
+REQ-03,Gulf Chemicals Co.,hazardous,300,12,2026-11-15,Industrial solvents
+REQ-04,Batinah Retail Co.,general,1000,3,2026-10-25,Single large block needed
+REQ-05,Sohar Packaging Services,general,450,12,2026-12-01,Long-term ambient space
