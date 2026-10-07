@@ -1,21 +1,25 @@
-import { NextResponse } from "next/server";
-import { ensureSeeded } from "@/lib/ensure";
+import { handle, body } from "@/lib/api";
 import { snapshot } from "@/lib/snapshot";
-import { tick, setRunning, setSpeed, resetSim } from "@/lib/sim";
+import { tick, advance, setRunning, setIntervalMs, resetSim } from "@/lib/sim";
+import { setSetting } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
+/** The server owns the clock. The browser only asks for ticks (with the hour it expects, so stale/duplicate requests are ignored). */
 export async function POST(req: Request) {
-  await ensureSeeded();
-  const body = (await req.json().catch(() => ({}))) as { action?: string; speed?: number };
-  let tickResult = null;
-  switch (body.action) {
-    case "tick": tickResult = await tick(); break;
-    case "play": setRunning(true); break;
-    case "pause": setRunning(false); break;
-    case "speed": setSpeed(Number(body.speed)); break;
-    case "reset": await resetSim(); break;
-    default: return NextResponse.json({ error: "unknown action" }, { status: 400 });
-  }
-  return NextResponse.json({ tick: tickResult, snapshot: snapshot() });
+  const b = await body(req);
+  return handle(() => {
+    let result: unknown = null;
+    switch (b.action) {
+      case "tick": result = tick({ expected: b.expected, auto: !!b.auto }); break;
+      case "advance": setRunning(false); result = advance({ hours: b.hours, untilDay: !!b.untilDay, untilCritical: !!b.untilCritical }); break;
+      case "play": setRunning(true); break;
+      case "pause": setRunning(false); break;
+      case "interval": setIntervalMs(Number(b.ms)); break;
+      case "auto_pause": setSetting("sim.auto_pause_critical", !!b.value); break;
+      case "reset": resetSim(); break;
+      default: throw new Error("unknown action");
+    }
+    return { result, snapshot: snapshot() };
+  });
 }

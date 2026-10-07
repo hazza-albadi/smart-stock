@@ -1,170 +1,182 @@
 import { db } from "./db";
 import { addDays } from "./time";
 import { rand } from "./rng";
-import { demandMultiplier } from "./seasonality";
-import { getItems, getSim, logEvent, fmt, uAr, type Item, type Lot, type Po } from "./core";
-import { runAll } from "./agents/coordinator";
+import { clockAt } from "./clock";
+import { dailyQuantity, hourlySplit, demandMultiplier, type SeasonCfg, type EventCfg } from "./calc";
+import { getItems, getSim, logEvent, M, type Item, type Lot, type Po } from "./core";
+import { loadSettings, setSetting, type Settings } from "./settings";
+import { addMovement, issueFefo, receiveGoods, totalOnHand } from "./stock";
+import { runAll, runScheduled } from "./agents/coordinator";
 import { seedDatabase } from "./seed";
-import { approvedAllocations } from "./agents/space";
 
-/** Physical room (m2) left in a zone: capacity - fixed area - stock held there - area promised to approved tenants. */
-function zoneRoom(zone: string): number {
+/** Plans the demand of one day: daily quantity per item (seeded), then split over 24 hours. Stored in demand_log. */
+function ensureDemandPlan(cfg: Settings, day: number, date: string, items: Item[]) {
   const d = db();
-  const z = d.prepare(`SELECT capacity_m2 c, fixed_occupied_m2_aisles_equipment f FROM warehouse_zones WHERE zone_id=?`).get(zone) as { c: number; f: number };
-  const used = (d.prepare(`SELECT COALESCE(SUM(c.quantity_on_hand*i.space_m2_per_unit),0) m FROM current_stock c JOIN items i ON i.item_id=c.item_id WHERE c.zone_id=?`).get(zone) as { m: number }).m;
-  const tenants = approvedAllocations().filter((a) => a.zone_id === zone).reduce((s, a) => s + a.area, 0);
-  return z.c - z.f - used - tenants;
-}
-
-const NOISE = 0.2; // +/-20% daily noise around the baseline
-
-function totalOnHand(itemId: string): number {
-  return (db().prepare(`SELECT COALESCE(SUM(quantity_on_hand),0) q FROM current_stock WHERE item_id=?`).get(itemId) as { q: number }).q;
-}
-
-function addMovement(date: string, itemId: string, type: "IN" | "OUT", qty: number, ref: string) {
-  const bal = totalOnHand(itemId);
-  const d = db();
-  const n = (d.prepare(`SELECT COUNT(*) c FROM stock_movements WHERE sim=1`).get() as { c: number }).c + 1;
-  d.prepare(`INSERT INTO stock_movements(movement_id,date,item_id,movement_type,quantity,reference,balance_after,sim) VALUES(?,?,?,?,?,?,?,1)`)
-    .run(`SIM-${String(n).padStart(5, "0")}`, date, itemId, type, qty, ref, bal);
-}
-
-/** Stochastic rounding keeps integer quantities while preserving the mean (needed for slow movers). */
-const stochRound = (x: number, r: number) => Math.floor(x) + (r < x - Math.floor(x) ? 1 : 0);
-
-function processDay(date: string, seed: number, items: Item[]) {
-  const d = db();
-
-  // 1) Lots that passed their expiry date are written off (FEFO).
-  const expired = d.prepare(`SELECT * FROM current_stock WHERE expiry_date IS NOT NULL AND expiry_date < ? AND quantity_on_hand>0`).all(date) as Lot[];
-  for (const l of expired) {
-    const it = items.find((i) => i.item_id === l.item_id) as Item;
-    d.prepare(`DELETE FROM current_stock WHERE lot_id=?`).run(l.lot_id);
-    addMovement(date, l.item_id, "OUT", l.quantity_on_hand, "EXPIRED");
-    const value = l.quantity_on_hand * it.unit_cost_omr;
-    logEvent("EXPIRED", l.item_id,
-      `انتهت صلاحية الدفعة ${l.lot_id}: شُطب ${fmt(l.quantity_on_hand)} ${uAr(it.unit)} من ${it.name_ar} (${fmt(value)} ر.ع)`,
-      `Lot ${l.lot_id} expired: ${fmt(l.quantity_on_hand)} ${it.unit} of ${it.name_en} written off (${fmt(value)} OMR)`, "high");
-  }
-
-  // 2) Purchase orders reaching their expected arrival are received (delayed POs only on their new date).
-  const due = d.prepare(`SELECT * FROM purchase_orders_open WHERE status IN ('OPEN','DELAYED_BY_SUPPLIER') AND expected_arrival<=? ORDER BY expected_arrival, po_id`)
-    .all(date) as Po[];
-  for (const p of due) {
-    const it = items.find((i) => i.item_id === p.item_id) as Item;
-    const expiry = it.shelf_life_days ? addDays(date, it.shelf_life_days) : null;
-    const sp = it.space_m2_per_unit;
-    // Receiving respects zone capacity: home zone first, general goods from Z1 overflow into Z5, the rest waits at the supplier.
-    const homeRoom = Math.max(0, Math.floor(zoneRoom(it.zone_id) / sp + 1e-9));
-    const inHome = Math.min(p.quantity, homeRoom);
-    let inOver = 0;
-    if (it.zone_id === "Z1" && p.quantity > inHome) inOver = Math.min(p.quantity - inHome, Math.max(0, Math.floor(zoneRoom("Z5") / sp + 1e-9)));
-    const got = inHome + inOver;
-    const rest = p.quantity - got;
-    const lotId = (z: string) => {
-      let id = `LOT-${p.item_id.slice(4)}-${p.po_id}${z === it.zone_id ? "" : "-" + z}`, n = 1;
-      while (d.prepare(`SELECT 1 FROM current_stock WHERE lot_id=?`).get(id)) id = `${id.replace(/-r\d+$/, "")}-r${++n}`;
-      return id;
-    };
-    if (inHome > 0) d.prepare(`INSERT INTO current_stock VALUES(?,?,?,?,?,?)`).run(lotId(it.zone_id), p.item_id, it.zone_id, inHome, date, expiry);
-    if (inOver > 0) d.prepare(`INSERT INTO current_stock VALUES(?,?,?,?,?,?)`).run(lotId("Z5"), p.item_id, "Z5", inOver, date, expiry);
-    if (got > 0) {
-      addMovement(date, p.item_id, "IN", got, p.po_id);
-      if (rest > 0) {
-        // partial receipt: keep the budget value on the received row, re-schedule the remainder for tomorrow
-        d.prepare(`UPDATE purchase_orders_open SET status='RECEIVED', received_date=?, quantity=? WHERE po_id=?`).run(date, got, p.po_id);
-        const rid = `${p.po_id.replace(/-R\d+$/, "")}-R${(d.prepare(`SELECT COUNT(*) c FROM purchase_orders_open WHERE po_id LIKE ?`).get(p.po_id.replace(/-R\d+$/, "") + "-R%") as { c: number }).c + 1}`;
-        d.prepare(`INSERT INTO purchase_orders_open VALUES(?,?,?,?,?,?,'OPEN',?,NULL)`).run(rid, p.item_id, p.supplier_id, rest, p.order_date, addDays(date, 1), p.source);
-      } else d.prepare(`UPDATE purchase_orders_open SET status='RECEIVED', received_date=? WHERE po_id=?`).run(date, p.po_id);
-      logEvent("PO_ARRIVED", p.item_id,
-        `وصل أمر الشراء ${p.po_id}: +${fmt(got)} ${uAr(it.unit)} من ${it.name_ar}` +
-          (inOver ? ` — ${fmt(inOver)} منها وُجّهت إلى منطقة الفائض Z5 لأن ${it.zone_id} ممتلئة` : "") +
-          (rest ? ` — بقي ${fmt(rest)} لدى المورّد لعدم توفر مساحة (إعادة جدولة غداً)` : ""),
-        `PO ${p.po_id} arrived: +${fmt(got)} ${it.unit} of ${it.name_en}` +
-          (inOver ? ` — ${fmt(inOver)} sent to overflow zone Z5 because ${it.zone_id} is full` : "") +
-          (rest ? ` — ${fmt(rest)} held at the supplier, no space (retry tomorrow)` : ""), inOver || rest ? "high" : "info");
-    } else {
-      // nothing fits: push to tomorrow, log once per PO
-      d.prepare(`UPDATE purchase_orders_open SET expected_arrival=? WHERE po_id=?`).run(addDays(date, 1), p.po_id);
-      if (!d.prepare(`SELECT 1 FROM events WHERE type='RECEIVING_BLOCKED' AND message_en LIKE ?`).get(`%${p.po_id}%`))
-        logEvent("RECEIVING_BLOCKED", p.item_id, `تعذّر استلام ${p.po_id} (${it.name_ar}): لا توجد مساحة في ${it.zone_id}${it.zone_id === "Z1" ? " أو Z5" : ""} — إعادة المحاولة غداً`,
-          `Cannot receive ${p.po_id} (${it.name_en}): no room in ${it.zone_id}${it.zone_id === "Z1" ? " or Z5" : ""} — retry tomorrow`, "high");
-    }
-  }
-
-  // 3) Daily usage = baseline x seasonality/spike x seeded noise, issued FEFO.
+  if ((d.prepare(`SELECT COUNT(*) c FROM demand_log WHERE day=?`).get(day) as { c: number }).c > 0) return;
+  const seed = cfg.n("sim.seed");
+  const season = cfg.j<SeasonCfg>("demand.season"), events = cfg.j<EventCfg[]>("demand.events");
+  const profile = cfg.j<number[]>("demand.hourly_profile");
   const base = new Map((d.prepare(`SELECT item_id, daily_base FROM sim_baseline`).all() as { item_id: string; daily_base: number }[]).map((b) => [b.item_id, b.daily_base]));
+  const ins = d.prepare(`INSERT INTO demand_log(day,item_id,hour,planned,issued) VALUES(?,?,?,?,0)`);
   for (const it of items) {
-    const noise = 1 + (rand(`${seed}|${date}|${it.item_id}|n`) * 2 - 1) * NOISE;
-    const want = stochRound((base.get(it.item_id) ?? 0) * demandMultiplier(it.item_id, date) * noise, rand(`${seed}|${date}|${it.item_id}|r`));
-    if (want <= 0) continue;
-    const before = totalOnHand(it.item_id);
-    let take = Math.min(want, before); // stock never goes below zero
-    const issued = take;
-    if (take > 0) {
-      const lots = d.prepare(`SELECT * FROM current_stock WHERE item_id=? AND quantity_on_hand>0 ORDER BY expiry_date IS NULL, expiry_date, received_date`).all(it.item_id) as Lot[];
-      for (const l of lots) {
-        if (take <= 0) break;
-        const used = Math.min(take, l.quantity_on_hand);
-        if (used >= l.quantity_on_hand) d.prepare(`DELETE FROM current_stock WHERE lot_id=?`).run(l.lot_id);
-        else d.prepare(`UPDATE current_stock SET quantity_on_hand=quantity_on_hand-? WHERE lot_id=?`).run(used, l.lot_id);
-        take -= used;
-      }
-      addMovement(date, it.item_id, "OUT", issued, "SALES/ISSUE");
-    }
-    if (issued < want || (before > 0 && before - issued <= 0)) {
-      // one stock-out event per episode (until the next receipt)
-      const lastIn = (d.prepare(`SELECT MAX(date) m FROM stock_movements WHERE item_id=? AND movement_type='IN' AND sim=1`).get(it.item_id) as { m: string | null }).m ?? "0000";
-      const already = d.prepare(`SELECT 1 FROM events WHERE type='STOCKOUT' AND item_id=? AND sim_date>=?`).get(it.item_id, lastIn);
-      if (!already || before > 0) {
-        logEvent("STOCKOUT", it.item_id, `نفاد المخزون — توقف الإنتاج: ${it.name_ar} (${it.item_id})`,
-          `Stockout – production stopped: ${it.name_en} (${it.item_id})`, "critical");
-      }
-    }
+    const q = dailyQuantity({ base: base.get(it.item_id) ?? 0, mult: demandMultiplier(season, events, it.item_id, date), noise: cfg.n("demand.noise"), seed, date, item: it.item_id });
+    if (q <= 0) continue;
+    hourlySplit(q, profile, (i) => rand(`${seed}|${date}|${it.item_id}|h${i}`)).forEach((v, h) => { if (v > 0) ins.run(day, it.item_id, h, v); });
   }
 }
 
-export interface TickResult { sim_date: string; movements: unknown[]; events: unknown[] }
+/** Leases start (area now held) or end (area returns) at the day boundary. */
+function leaseLifecycle(date: string) {
+  const d = db();
+  const tick = getSim().tick;
+  for (const l of d.prepare(`SELECT * FROM leases WHERE status='RESERVED' AND start_date<=?`).all(date) as { id: number; request_id: string; company: string; zone_id: string; area: number; end_date: string }[]) {
+    d.prepare(`UPDATE leases SET status='ACTIVE' WHERE id=?`).run(l.id);
+    logEvent("LEASE_START", null, M("ev.lease_start", { req: l.request_id, company: l.company, area: l.area, zone: l.zone_id, end: l.end_date }), "info", { ref: l.request_id });
+  }
+  for (const l of d.prepare(`SELECT * FROM leases WHERE status IN ('ACTIVE','RESERVED') AND end_date<=?`).all(date) as { id: number; request_id: string; company: string; zone_id: string; area: number }[]) {
+    d.prepare(`UPDATE leases SET status='ENDED', ended_tick=? WHERE id=?`).run(tick, l.id);
+    logEvent("LEASE_END", null, M("ev.lease_end", { req: l.request_id, company: l.company, area: l.area, zone: l.zone_id }), "info", { ref: l.request_id });
+  }
+}
 
-/** Advances the simulated clock by one day, writes the movements, then lets the Coordinator run the agents. */
-export async function tick(): Promise<TickResult> {
+function processHour(cfg: Settings, tick: number, items: Item[]) {
   const d = db();
   const s = getSim();
-  const items = getItems();
-  const lastSeq = (d.prepare(`SELECT COALESCE(MAX(seq),0) m FROM stock_movements`).get() as { m: number }).m;
-  const lastEvent = (d.prepare(`SELECT COALESCE(MAX(id),0) m FROM events`).get() as { m: number }).m;
+  const { date, hour, day } = clockAt(s.start_date, tick);
+  const itemOf = new Map(items.map((i) => [i.item_id, i]));
+  const lastUsable = cfg.n("expiry.last_usable_hour");
 
-  const next = addDays(s.sim_date, 1);
-  d.transaction(() => {
-    // close every day up to and including the current simulated date (covers the 2-day gap after the history ends)
-    let day = s.processed_through;
-    while (day < s.sim_date) {
-      day = addDays(day, 1);
-      processDay(day, s.seed, items);
+  if (hour === 0) leaseLifecycle(date);
+
+  // 1) Lots past their expiry hour are written off (everything left in the lot).
+  const expired = d.prepare(`SELECT * FROM current_stock WHERE expiry_date IS NOT NULL AND quantity_on_hand>0 AND (expiry_date<? OR (expiry_date=? AND ?>?))`)
+    .all(date, date, hour, lastUsable) as Lot[];
+  for (const l of expired) {
+    const it = itemOf.get(l.item_id) as Item;
+    d.prepare(`UPDATE current_stock SET quantity_on_hand=0 WHERE lot_id=?`).run(l.lot_id);
+    addMovement(date, l.item_id, "OUT", l.quantity_on_hand, "EXPIRED", l.lot_id);
+    logEvent("EXPIRED", l.item_id, M("ev.expired", { lot: l.lot_id, qty: l.quantity_on_hand, unit: it.unit, item: it.item_id, value: l.quantity_on_hand * it.unit_cost_omr }), "high", { ref: l.lot_id });
+  }
+
+  // 2) Purchase orders whose delivery date and hour have come are received (delayed POs only at their new date and hour).
+  const due = d.prepare(`SELECT * FROM purchase_orders_open WHERE status IN ('OPEN','DELAYED_BY_SUPPLIER') AND (expected_arrival<? OR (expected_arrival=? AND expected_hour<=?))
+    ORDER BY expected_arrival, expected_hour, po_id`).all(date, date, hour) as Po[];
+  const retry = cfg.n("delivery.retry_hours");
+  for (const p of due) {
+    const it = itemOf.get(p.item_id) as Item;
+    const r = receiveGoods(cfg, it, p.quantity, date, p.po_id);
+    const later = clockAt(s.start_date, tick + retry);
+    if (r.got > 0) {
+      if (r.rest > 0) {
+        // partial receipt: the received part keeps its budget value, the remainder is a new row retried later
+        d.prepare(`UPDATE purchase_orders_open SET status='RECEIVED', received_date=?, received_tick=?, quantity=? WHERE po_id=?`).run(date, tick, r.got, p.po_id);
+        const root = p.po_id.replace(/-R\d+$/, "");
+        const n = (d.prepare(`SELECT COUNT(*) c FROM purchase_orders_open WHERE po_id LIKE ?`).get(root + "-R%") as { c: number }).c + 1;
+        d.prepare(`INSERT INTO purchase_orders_open(po_id,item_id,supplier_id,quantity,order_date,expected_arrival,status,source,received_date,expected_hour,ordered_tick,received_tick,emergency,premium,rec_key)
+          VALUES(?,?,?,?,?,?,'OPEN',?,NULL,?,?,NULL,?,?,?)`).run(`${root}-R${n}`, p.item_id, p.supplier_id, r.rest, p.order_date, later.date, p.source, later.hour, p.ordered_tick, p.emergency, p.premium, p.rec_key);
+      } else d.prepare(`UPDATE purchase_orders_open SET status='RECEIVED', received_date=?, received_tick=? WHERE po_id=?`).run(date, tick, p.po_id);
+      logEvent("PO_ARRIVED", p.item_id, M("ev.po_arrived", { po: p.po_id, qty: r.got, unit: it.unit, item: it.item_id, hour }), "info", { ref: p.po_id });
+      if (r.inOver) logEvent("PO_OVERFLOW", p.item_id, M("ev.po_overflow", { po: p.po_id, qty: r.inOver, zone: cfg.s("space.overflow_zone"), home: it.zone_id, item: it.item_id }), "high", { ref: p.po_id });
+      if (r.rest) logEvent("PO_HELD", p.item_id, M("ev.po_held", { po: p.po_id, qty: r.rest, hours: retry, item: it.item_id }), "high", { ref: p.po_id });
+    } else {
+      d.prepare(`UPDATE purchase_orders_open SET expected_arrival=?, expected_hour=? WHERE po_id=?`).run(later.date, later.hour, p.po_id);
+      if (!d.prepare(`SELECT 1 FROM events WHERE type='RECEIVING_BLOCKED' AND ref=?`).get(p.po_id))
+        logEvent("RECEIVING_BLOCKED", p.item_id, M("ev.receiving_blocked", { po: p.po_id, item: it.item_id, zone: it.zone_id, hours: retry }), "high", { ref: p.po_id });
     }
-    d.prepare(`UPDATE sim_state SET sim_date=?, processed_through=? WHERE id=1`).run(next, s.sim_date);
+  }
+
+  // 3) Hourly demand from today's plan (FEFO issue, stock never below zero; unmet demand is recorded).
+  ensureDemandPlan(cfg, day, date, items);
+  for (const row of d.prepare(`SELECT item_id, planned FROM demand_log WHERE day=? AND hour=? ORDER BY item_id`).all(day, hour) as { item_id: string; planned: number }[]) {
+    const it = itemOf.get(row.item_id) as Item;
+    const before = totalOnHand(it.item_id);
+    const issued = issueFefo(it, Math.min(row.planned, before), date, "SALES/ISSUE");
+    d.prepare(`UPDATE demand_log SET issued=? WHERE day=? AND item_id=? AND hour=?`).run(issued, day, it.item_id, hour);
+    if (issued < row.planned || (before > 0 && before - issued <= 0)) {
+      // one stock-out event per episode (until the next receipt)
+      const lastIn = (d.prepare(`SELECT MAX(tick) m FROM stock_movements WHERE item_id=? AND movement_type='IN' AND sim=1`).get(it.item_id) as { m: number | null }).m ?? -1;
+      const already = d.prepare(`SELECT 1 FROM events WHERE type='STOCKOUT' AND item_id=? AND tick>=?`).get(it.item_id, lastIn);
+      if (!already || before > 0) logEvent("STOCKOUT", it.item_id, M("ev.stockout", { item: it.item_id }), "critical", { ref: it.item_id });
+    }
+  }
+}
+
+export interface TickResult {
+  ignored?: "stale" | "paused" | "too_soon"; tick: number; sim_date: string; hour: number;
+  movements: unknown[]; events: unknown[]; critical: unknown[]; paused: boolean; ticks: number;
+}
+
+const maxId = (t: string, c = "id") => (db().prepare(`SELECT COALESCE(MAX(${c}),0) m FROM ${t}`).get() as { m: number }).m;
+
+/**
+ * Advances the clock by ONE simulated hour inside a single transaction. The browser only asks for ticks; `expected` makes a request
+ * idempotent (a stale or duplicate request is ignored) and `auto` requests are also refused while paused or faster than the interval.
+ */
+export function tick(o: { expected?: number; auto?: boolean } = {}): TickResult {
+  const d = db();
+  const s = getSim();
+  const base = { tick: s.tick, sim_date: s.sim_date, hour: s.hour, movements: [], events: [], critical: [], paused: !s.running, ticks: 0 };
+  if (o.expected !== undefined && o.expected !== s.tick) return { ...base, ignored: "stale" };
+  if (o.auto && !s.running) return { ...base, ignored: "paused" };
+  if (o.auto && Date.now() - s.last_tick_at < s.interval_ms * 0.8) return { ...base, ignored: "too_soon" };
+
+  const cfg = loadSettings();
+  const items = getItems();
+  const lastSeq = maxId("stock_movements", "seq"), lastEvent = maxId("events");
+  d.transaction(() => {
+    processHour(cfg, s.tick, items);
+    const next = clockAt(s.start_date, s.tick + 1);
+    d.prepare(`UPDATE sim_state SET tick=?, sim_date=?, last_tick_at=?, data_end=CASE WHEN ?=0 THEN ? ELSE data_end END WHERE id=1`)
+      .run(next.tick, next.date, Date.now(), next.hour, addDays(next.date, -1));
+    runScheduled();
+    const keep = cfg.n("log.keep_agent_runs");
+    d.prepare(`DELETE FROM agent_runs WHERE id <= (SELECT COALESCE(MAX(id),0) FROM agent_runs) - ?`).run(keep);
   })();
 
-  await runAll({ useLlm: false, group: `${next}#tick` });
-
-  const movements = d.prepare(`SELECT m.seq, m.movement_id, m.date, m.item_id, i.name_ar, i.name_en, i.unit, m.movement_type, m.quantity,
-    m.reference, m.balance_after FROM stock_movements m JOIN items i ON i.item_id=m.item_id WHERE m.seq>? ORDER BY m.seq`).all(lastSeq);
-  const events = d.prepare(`SELECT * FROM events WHERE id>? ORDER BY id`).all(lastEvent);
-  return { sim_date: next, movements, events };
+  const movements = d.prepare(`SELECT m.seq, m.movement_id, m.date, m.tick, m.item_id, i.unit, m.movement_type, m.quantity, m.reference, m.balance_after, m.lot_id, m.actor
+    FROM stock_movements m JOIN items i ON i.item_id=m.item_id WHERE m.seq>? ORDER BY m.seq`).all(lastSeq);
+  const events = (d.prepare(`SELECT * FROM events WHERE id>? ORDER BY id`).all(lastEvent) as { severity: string; msg: string; meta: string | null }[])
+    .map((e) => ({ ...e, msg: JSON.parse(e.msg), meta: e.meta ? JSON.parse(e.meta) : null }));
+  const critical = events.filter((e) => e.severity === "critical");
+  let paused = false;
+  if (critical.length && cfg.b("sim.auto_pause_critical")) { d.prepare(`UPDATE sim_state SET running=0 WHERE id=1`).run(); paused = true; }
+  const n = getSim();
+  return { tick: n.tick, sim_date: n.sim_date, hour: n.hour, movements, events, critical, paused: paused || !n.running, ticks: 1 };
 }
 
-export function setRunning(running: boolean) {
-  db().prepare(`UPDATE sim_state SET running=? WHERE id=1`).run(running ? 1 : 0);
-}
-export function setSpeed(speed: number) {
-  db().prepare(`UPDATE sim_state SET speed=? WHERE id=1`).run([1, 2, 5].includes(speed) ? speed : 1);
+/** Server-side loop for "run N hours", "jump to next day" and "jump to next critical event". */
+export function advance(o: { hours?: number; untilDay?: boolean; untilCritical?: boolean }): TickResult {
+  const cfg = loadSettings();
+  const cap = cfg.n("sim.max_advance_hours");
+  const s = getSim();
+  let hours = o.untilDay ? 24 - s.hour : Math.max(1, Math.floor(o.hours ?? 1));
+  if (o.untilCritical) hours = cap;
+  hours = Math.min(hours, cap);
+  const acc: TickResult = { tick: s.tick, sim_date: s.sim_date, hour: s.hour, movements: [], events: [], critical: [], paused: !s.running, ticks: 0 };
+  for (let i = 0; i < hours; i++) {
+    const r = tick();
+    acc.movements.push(...r.movements); acc.events.push(...r.events); acc.critical.push(...r.critical);
+    acc.tick = r.tick; acc.sim_date = r.sim_date; acc.hour = r.hour; acc.paused = r.paused; acc.ticks++;
+    if (r.critical.length && (o.untilCritical || cfg.b("sim.auto_pause_critical"))) {
+      db().prepare(`UPDATE sim_state SET running=0 WHERE id=1`).run(); acc.paused = true; break;
+    }
+  }
+  if (acc.movements.length > 400) acc.movements = acc.movements.slice(-400);
+  return acc;
 }
 
-/** Restores the starting state (re-seeds from the CSV files) and re-runs the agents once. */
-export async function resetSim() {
-  const speed = getSim().speed;
-  seedDatabase();
-  setSpeed(speed);
-  await runAll({ useLlm: false, group: "start" });
+export const setRunning = (running: boolean) => { db().prepare(`UPDATE sim_state SET running=? WHERE id=1`).run(running ? 1 : 0); };
+
+/** Changing the speed never touches the clock state: it only changes the pause between ticks. */
+export function setIntervalMs(ms: number) {
+  const min = loadSettings().n("sim.min_interval_ms");
+  const v = Math.max(min, Math.round(Number(ms) || 0));
+  db().prepare(`UPDATE sim_state SET interval_ms=? WHERE id=1`).run(v);
+  setSetting("sim.interval_ms", v);
+}
+
+/** Restores the starting state (re-seeds from the CSV files, keeps the user's settings) and runs the agents once. */
+export function resetSim() {
+  seedDatabase({ keepSettings: true });
+  runAll({ group: "start", trigger: "start" });
 }

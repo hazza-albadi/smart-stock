@@ -1,0 +1,39 @@
+{
+  "days": 30,
+  "seeds": [
+    42,
+    7,
+    2026
+  ],
+  "runs": [
+    {
+      "seed": 42,
+      "checks": 8021,
+      "failures": 0,
+      "fingerprint": "feaaa142d700bde0247eed3566100897",
+      "seconds": 110,
+      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-2408-42.db"
+    },
+    {
+      "seed": 7,
+      "checks": 8021,
+      "failures": 0,
+      "fingerprint": "5930a7d3c145e5305f3e0a44629e7420",
+      "seconds": 124,
+      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-2408-7.db"
+    },
+    {
+      "seed": 2026,
+      "checks": 8021,
+      "failures": 0,
+      "fingerprint": "87dcbec5e6a3be02b2a08ad59be16d55",
+      "seconds": 139,
+      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-2408-2026.db"
+    }
+  ],
+  "determinism": {
+    "same_seed_same_result": true,
+    "different_seed_different_result": true
+  },
+  "failures": []
+}

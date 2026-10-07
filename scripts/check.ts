@@ -1,42 +1,30 @@
-// Prints the acceptance checks from the brief against the freshly seeded database.
-// Usage: npm run test:agents [days]   (days = simulated days to advance before printing)
+// npm run check [hours] — prints the acceptance picture of the day-0 state (and optionally after N simulated hours), rendered in English.
 import { seedDatabase } from "../lib/seed";
-import { db } from "../lib/db";
 import { runAll } from "../lib/agents/coordinator";
-import { tick } from "../lib/sim";
-import { budgetInfo } from "../lib/agents/replenishment";
+import { advance } from "../lib/sim";
+import { snapshot } from "../lib/snapshot";
+import { render } from "../lib/render";
+import { setSetting } from "../lib/settings";
 
-async function main() {
-  const days = Number(process.argv[2] ?? 0);
-  seedDatabase();
-  await runAll({ useLlm: false, group: "start" });
-  for (let i = 0; i < days; i++) await tick();
-  const d = db();
-  const all = (sql: string, ...a: unknown[]) => d.prepare(sql).all(...a) as Record<string, any>[];
+seedDatabase();
+runAll({ group: "start", trigger: "start" });
+const hours = Number(process.argv[2] ?? 0);
+if (hours > 0) { setSetting("sim.auto_pause_critical", false); advance({ hours }); }
+const s = snapshot();
+const items = Object.fromEntries(s.items.map((i) => [i.item_id, i]));
+const R = (m: any) => render("en", m, { items });
 
-  console.log("\n== sim", all(`SELECT sim_date, processed_through FROM sim_state`)[0]);
-  console.log("\n== forecasts (interesting)");
-  console.table(all(`SELECT item_id, round(weekly_usage,1) w, on_hand, round(weeks_cover,1) cover, round(anomaly_ratio,2) ratio, anomaly,
-    round(season_factor,2) season, round(usable_qty) usable, stockout_date, days_to_stockout dts FROM forecasts
-    WHERE item_id IN ('SKU-001','SKU-002','SKU-003','SKU-005','SKU-019','SKU-021','SKU-022','SKU-023')`));
-  const b = budgetInfo();
-  console.log("\n== budget", { total: b.total, committed: Math.round(b.committed), free: Math.round(b.total - b.committed) });
-  console.log("\n== replenishment plan");
-  console.table(all(`SELECT rank, item_id, qty, round(cost) cost, status, substr(reason_en,1,90) reason FROM replenishment_plan ORDER BY rank`));
-  console.log("\n== zones");
-  console.table(all(`SELECT zone_id, round(used) used, reserved, round(free) free, round(rentable) rentable, allocated, round(over_capacity) over FROM zone_space`));
-  console.log("\n== alerts");
-  console.table(all(`SELECT severity, kind, item_id, substr(title_en,1,80) title FROM alerts WHERE active=1 ORDER BY CASE severity WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Monitor' THEN 2 ELSE 3 END`));
-  console.log("\n== recommendations");
-  console.table(all(`SELECT id, key, kind, status FROM recommendations`));
-  console.log("\n== space proposals");
-  for (const r of all(`SELECT payload FROM recommendations WHERE kind='SPACE'`)) {
-    const p = JSON.parse(r.payload);
-    console.log(p.request_id, p.decision, p.area_m2, JSON.stringify(p.allocations), "|", p.reason_en);
-  }
-  console.log("\n== agent log (last run)");
-  console.table(all(`SELECT agent, substr(summary_en,1,150) s FROM agent_runs ORDER BY id DESC LIMIT 5`));
-  console.log("\n== events (latest 12)");
-  console.table(all(`SELECT sim_date, type, severity, substr(message_en,1,90) m FROM events ORDER BY id DESC LIMIT 12`));
-}
-main();
+console.log(`\n== clock: day ${s.sim.day + 1}, ${s.sim.date} ${String(s.sim.hour).padStart(2, "0")}:00 (tick ${s.sim.tick})`);
+console.log("== KPIs", JSON.stringify(s.kpi));
+console.log("\n== items");
+console.table(s.items.map((i) => ({ id: i.item_id, onHand: Math.round(i.on_hand), perWeek: +i.weekly_usage.toFixed(1), cover: +i.weeks_cover.toFixed(2), status: i.status, anomaly: i.anomaly ? +i.anomaly_ratio.toFixed(2) : "", stockoutH: i.stockout_hours === null ? "" : Math.round(i.stockout_hours) })));
+console.log("== budget", { total: s.budget.total, committed: Math.round(s.budget.committed), free: Math.round(s.kpi.budget_remaining) });
+console.log("\n== replenishment plan");
+console.table(s.plan.map((p) => ({ rank: p.rank, item: p.item_id, qty: p.qty, cost: Math.round(p.cost), status: p.status, reason: R(p.reason).slice(0, 90) })));
+console.log("== zones");
+console.table(s.zones.map((z) => ({ zone: z.zone_id, used: Math.round(z.used), reserved: z.reserved, rentable: Math.round(z.net), allocated: z.allocated, over: Math.round(z.over_capacity) })));
+console.log("== space proposals");
+for (const r of s.recs.filter((x) => x.kind === "SPACE")) console.log(`${r.request_id} ${r.payload.decision} ${Math.round(r.payload.area_m2)} | ${R(r.payload.reason)}${r.payload.note ? " | NOTE: " + R(r.payload.note) : ""}`);
+console.log("\n== alerts");
+console.table(s.alerts.map((a) => ({ severity: a.severity, kind: a.kind, title: R(a.title).slice(0, 80), ignore: a.ignore_msg ? R(a.ignore_msg).slice(0, 70) : "" })));
+console.log("== pending recommendations:", s.recs.filter((r) => r.status === "PENDING").map((r) => r.key).join(", "));

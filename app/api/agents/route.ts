@@ -1,16 +1,17 @@
-import { NextResponse } from "next/server";
-import { ensureSeeded } from "@/lib/ensure";
+import { handle, body } from "@/lib/api";
 import { snapshot } from "@/lib/snapshot";
 import { AGENT_ORDER, runAgent, type AgentName } from "@/lib/agents/coordinator";
-import { llmEnabled } from "@/lib/llm";
+import { polishPendingMessages } from "@/lib/llm";
 
 export const dynamic = "force-dynamic";
 
-/** Runs ONE agent per call so the UI can show the five agents working one after another. */
+/** Runs ONE agent per call ("Run analysis" calls the five in order so they can be shown one after another). */
 export async function POST(req: Request) {
-  await ensureSeeded();
-  const body = (await req.json().catch(() => ({}))) as { agent?: AgentName; group?: string };
-  if (!body.agent || !AGENT_ORDER.includes(body.agent)) return NextResponse.json({ error: "unknown agent" }, { status: 400 });
-  const result = await runAgent(body.agent, body.group ?? `manual#${Date.now()}`, llmEnabled());
-  return NextResponse.json({ result, snapshot: snapshot() });
+  const b = await body(req);
+  return handle(async () => {
+    if (!AGENT_ORDER.includes(b.agent)) throw new Error("unknown agent");
+    const result = runAgent(b.agent as AgentName, b.group ?? `manual#${Date.now()}`, "manual");
+    if (b.agent === "alerts") await polishPendingMessages();
+    return { result, snapshot: snapshot() };
+  });
 }

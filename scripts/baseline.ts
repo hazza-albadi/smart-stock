@@ -8,9 +8,9 @@ import { seedDatabase } from "../lib/seed";
 import { runAll } from "../lib/agents/coordinator";
 import { readDay0State } from "../lib/baselineState";
 
-async function main() {
+function main() {
   seedDatabase();
-  await runAll({ useLlm: false, group: "start" });
+  runAll({ group: "start", trigger: "start" });
   const state = readDay0State();
   if (process.argv.includes("--state")) { console.log(JSON.stringify(state, null, 2)); return; }
   const run = (name: string, cmd: string, args: string[]) => {
@@ -24,7 +24,7 @@ async function main() {
   ];
   // the build leaves .next behind; the checks above re-seed the DB, so restore the day-0 DB
   seedDatabase();
-  await runAll({ useLlm: false, group: "start" });
+  runAll({ group: "start", trigger: "start" });
   const out = { generated_by: "scripts/baseline.ts", commands, day0: state };
   fs.mkdirSync(path.join(process.cwd(), "docs"), { recursive: true });
   fs.writeFileSync(path.join(process.cwd(), "docs", "baseline.json"), JSON.stringify(out, null, 2));

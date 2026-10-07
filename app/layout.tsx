@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SmartStock — Qeshour",
+  title: "SmartStock",
   description: "Inventory and warehouse-space assistant (live simulation MVP)",
 };
 

@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "seed": "tsx scripts/seed.ts",
-    "test:agents": "tsx scripts/check.ts"
+    "audit": "tsx scripts/audit.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "tsx scripts/check.ts",
+    "literals": "tsx scripts/literals.ts",
+    "baseline": "tsx scripts/baseline.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

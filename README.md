@@ -1,83 +1,165 @@
-# SmartStock — Live MVP
+# SmartStock — Live MVP (hourly simulation)
 
 Inventory and warehouse-space assistant for **Qeshour** (chitosan from shrimp, crab and lobster shells).
-Next.js (App Router) + TypeScript + Tailwind, SQLite (`better-sqlite3`). Arabic RTL by default, English toggle, light/dark.
-Runs fully locally: no cloud, no login, no API key needed.
+Next.js (App Router) + TypeScript + Tailwind, SQLite (`better-sqlite3`). Arabic RTL by default, English toggle, light/dark. Runs fully
+locally: no cloud, no login, no API key needed.
 
-The dashboard is a **live simulation** driven by the CSVs in `smartstock_data/`: stock movements (IN/OUT) appear one after
-another, stock levels change, and five coordinating agents re-run after every simulated day so alerts, purchase-order drafts
-and space decisions update by themselves.
+The clock advances **one simulated hour per tick**. Stock movements, deliveries, expiries and decisions happen at a precise date and hour,
+five coordinating agents re-run on a schedule, and every decision you take (approve / reject / edit / manual action) changes what happens next.
 
 ## Install and run
 
 ```bash
 npm install
-npm run seed     # builds smartstock.db from smartstock_data/*.csv and runs the agents once
+npm run seed     # builds smartstock.db from smartstock_data/*.csv + config/defaults.json and runs the agents once
 npm run dev      # http://localhost:3000
 ```
 
-Requires Node 20+ (tested on Node 24). If `smartstock.db` does not exist the app seeds itself on the first request.
-`SmartStock_demo_answer_key.md` is not part of this project (use it only for manual comparison).
-
-Optional: set `ANTHROPIC_API_KEY` to let a model polish the wording of supplier messages when you press **Run analysis**.
-All numbers and decisions stay in deterministic code; without a key the built-in Arabic/English templates are used.
-
-```bash
-npm run test:agents        # prints the acceptance checks from the brief against the fresh database
-npm run test:agents 10     # same, after simulating 10 days
-```
-
-## 2-minute demo script
-
-1. Open the page (date **2026-10-05**). Point at the KPIs: 4 items at risk, **3,989 OMR** budget left, **1,400 m²** rentable.
-2. Press **Play** (try 2x). Movements slide into the live feed, stock rows flash, and the date advances.
-   Within two simulated days **SKU-002 frozen shrimp shells** hits zero: red toast "Stockout – production stopped".
-3. Press **Pause**, then **Run analysis**: the five agents (Forecast → Replenishment → Space → Alerts → Space matching)
-   light up one after another in the *Agent activity* panel.
-4. In *Alerts & recommendations* open the SKU-002 card: delayed PO-002, a drafted Arabic/English supplier message that suggests
-   dried shrimp shells (SKU-001) as a temporary alternative, and a draft PO. Press **Approve** on the PO — the PO appears in the
-   stock table with its arrival date and the budget bar moves.
-5. Scroll to **Warehouse space**: Z1 500 m² + Z5 900 m² rentable. REQ-01 approve (Z5), REQ-02 reject (cold), REQ-03 reject
-   (hazardous), REQ-04 partial/split, REQ-05 approve (Z1). Approve REQ-01 and watch rentable space and the other proposals update.
-6. Press **Play** again: SKU-003 (718 kg, expires 2026-10-10) is written off on 10-11 if nobody acts; the approved PO arrives
-   as an IN movement. **Reset** restores the starting state.
-
-## How it is built
-
-| Piece | Where |
+| command | what it does |
 |---|---|
-| SQLite schema, seed from CSV, reset | `lib/db.ts`, `lib/seed.ts` (`npm run seed`) |
-| Simulation engine (daily OUT, PO receipts, expiry write-offs, stock-outs) | `lib/sim.ts`, `lib/seasonality.ts`, `lib/rng.ts` |
-| Agents | `lib/agents/forecast.ts`, `replenishment.ts`, `space.ts`, `alerts.ts`, `matching.ts`, run in order by `coordinator.ts` |
-| Human in the loop (Approve / Reject) | `lib/decisions.ts` → `recommendations.status` |
-| API (all reads/writes go through SQLite) | `app/api/{state,sim,agents,recommendations,items}` |
-| UI | `components/*`, `lib/i18n.ts` |
+| `npm test` | unit + integration tests (calc layer, i18n keys, day-0 baseline, ticks, decisions, leases, manual actions) |
+| `npm run audit [days] [seeds…]` | number audit: 30 days × 3 seeds on a throw-away DB, ~9 min, fails loudly (writes `docs/audit-report.json`, `docs/hourly-vs-daily.md`) |
+| `npm run check [hours]` | prints the acceptance picture (day 0, or after N hours) rendered in English |
+| `npm run literals` | repo-wide search for hard-coded item/zone/request/PO ids, budget and rate literals in `app/`, `components/`, `lib/` |
+| `npm run baseline` | regenerates `docs/baseline.json` (day-0 state + tsc/build/check results) from a fresh DB — only run on purpose |
 
-SQLite is the single source of truth. Extra tables: `agent_runs`, `events`, `recommendations`, `sim_state`, plus agent outputs
-(`forecasts`, `replenishment_plan`, `zone_space`, `alerts`) and `sim_baseline`.
-The browser drives the clock (one `POST /api/sim {tick}` per simulated day), so nothing runs in the background when the page is closed.
+Optional: `ANTHROPIC_API_KEY` lets a model polish supplier-message wording when you press **Run analysis** (numbers stay deterministic).
 
-### Simulation rules
-* Daily usage = baseline (last 4 weeks of history; SKU-019: the 12 weeks before its spike) ÷ 7 × seasonality × seeded noise (±20 %).
-  Seasonality: SKU-001/006/017 ramp from 1.0 to 1.8 between 5 and 19 Oct and stay there until March. SKU-019 stays at ~3x for five days, then eases off over ten.
-* Randomness is derived from `seed|date|item`, so every run is identical (checked: two 10-day runs give the same movements).
-* Lots are issued first-expired-first-out. A PO is received on its `expected_arrival` (delayed PO-002 only on 2026-10-21). Lots past `expiry_date` are written off (`reference = EXPIRED`). Stock never goes below 0.
-* The data ends on 2026-10-03 while "today" is 2026-10-05, so the first tick also fills in 10-04 and 10-05.
+## 2-minute demo script (hourly)
 
-### Agent rules (all deterministic)
-* **Forecast** — weekly usage from the last 4 weeks, 4-week forecast with the seasonal index, weeks of cover, anomaly = last 3 weeks above 2x the prior 12-week average (min. 5 units/week), usable stock before lot expiry, projected stock-out date.
-* **Replenishment** — reorder point = forecast demand over (lead time + 14-day review cycle) + safety stock, counting open POs that arrive in that window. Cover above 12 weeks is never reordered. Order quantity covers lead time + 8 weeks (half the shelf life for perishables), capped at 12 weeks of cover. Priority: criticality A → B → C; inside A, stock-out risk first, then safety gear and chemicals. Budget 18,000 OMR with open POs (≈14,012 OMR) already committed; a line that does not fit is reduced to the minimum quantity that restores the reorder point (A items only) or deferred with the reason stated.
-* **Space** — used = fixed + Σ(on-hand × m² per unit) of the zone's items; rentable = capacity − used − reserved buffer where `rent_allowed = yes`; approved tenants are subtracted.
-* **Alerts** — Critical/High/Monitor/Info for stock-out risk, delayed PO, demand anomaly, overstock (> 20 weeks), expiry within 14 days, safety gear below safety stock (plus a safeguard alert if a zone were ever over capacity). Critical/High supplier issues get a bilingual message draft.
-* **Space matching** — cold/hazardous are rejected. Every general request is first judged **independently** against the rentable area (nothing else pending is deducted): it is approved in the smallest zone that fits, or, if no single zone fits, offered the largest single block plus a split. REQ-04 therefore reads "cannot fit as one block, largest single block 900 m² (Z5): propose 900 m² in Z5, or split 900 Z5 + 100 Z1". The sequential effect is shown only as a separate note (earliest start date first): "if REQ-01 + REQ-05 are approved first, only 350 m² would remain (Z5 300 + Z1 50)", plus a panel line with what stays rentable if all single-block approvals are accepted. After each approval the agents re-run, so the remaining pending proposals are recalculated against what is left, and approving a proposal whose area was taken meanwhile is refused.
+1. Open the page: **Mon 5 Oct 2026 – 00:00**, 4 items at risk, **3,988.500 OMR** free, **1,400 m²** rentable. Speed is *1 hour = 5 s*; auto-pause is on.
+2. Press **Play**. Each tick is one hour: movements appear in the feed, stock rows flash. Change the speed (0.5 s … 30 s or custom) while it runs — nothing is lost.
+3. Frozen shrimp shells (≈49 h of stock) hit zero on 7 Oct: the simulation **auto-pauses** with a red banner "Stockout – production stopped".
+4. Open **Pending decisions** (note the ages, "overdue" after 24 h) and the SKU-002 alert: *what happened · since when · why · what the system proposes · what happens if you ignore it*.
+   Edit the quantity of the PO draft, press **Approve**: budget is committed *now*, the PO appears with its **arrival date and hour**.
+5. **Reject** another draft (e.g. respirator masks) — it is remembered and not re-proposed every hour; it comes back only after the cooldown or when much worse, with the reason.
+6. Press **Next day** / **Run 6 hours** / **Next critical event**. Watch the approved PO arrive at its hour (event feed, stock, space).
+7. In **Warehouse space** approve REQ-01 (lease reserved from its start date) and reject REQ-03. Rentable space drops only when the lease starts; the other proposals are recalculated.
+8. Open **Decision impact log**: every decision with its effects ("You approved PO … → arrived 10 Oct 14:00 … but SKU-002 had already stocked out … production stopped for 55 h").
+9. Click any **ⓘ** next to a number to see its formula, inputs and sources. Press **Data health** to run the invariant checks on the live database.
+10. **Reset** restores the start state (your settings are kept).
 
-### Zone capacity (no zone is ever above 100 %)
-The open POs are large for the space the data gives Z1 (they would add > 3,000 m² on 7 Oct), so receiving now respects physical room instead of changing `space_m2_per_unit` (which would change the starting numbers):
-* Room in a zone = capacity − fixed area − stock held there − area promised to approved tenants (the reserved buffer may be used by stock; it only protects rentable space).
-* A PO is received into the item's home zone first. Z1 general goods that do not fit **overflow into Z5**; the event feed says so ("N sent to overflow zone Z5 because Z1 is full").
-* If Z1 and Z5 are both full (or the item belongs to Z2/Z3/Z4, which never overflow), the PO is received **partially**: the received part is booked (IN movement, budget value kept), the remainder becomes a new `PO-…-R1` row scheduled for the next day, with a "held at the supplier, no space" event, and is retried daily as stock is consumed.
-* Space used is now computed from the zone where each lot is actually held (identical to the item's zone at the start). Starting numbers are unchanged: Z1 500 m², Z5 900 m², total 1,400 m²; as overflow arrives Z1 and Z5 rentable space falls towards 0, which is the realistic consequence.
-* Checked over a 40-day simulation: used area never exceeds capacity in any zone.
+## Agent schedule (configurable in Settings)
 
-### Notes on the data
-* All starting results come from the data and the rules, nothing is hard-coded.
+| agent | runs |
+|---|---|
+| alerts (cheap rules: stock-out, expiry, delayed PO, safety, anomaly, overdue decisions, lease risk) | every hour |
+| forecast | daily 06:00 |
+| replenishment, space optimisation | daily 08:00 and on demand (**Run analysis**) |
+| space matching | after the space agent, after every decision, and when a space request is added |
+
+Movement booking, stock-out and expiry checks run in the engine every hour. Each tick is one database transaction. Stock-dependent figures (cover, usable stock,
+stock-out projection, rentable space) are always computed live from the tables; the forecast agent only refreshes demand parameters.
+
+## Time and demand
+
+* The clock is an integer `tick` (hours since the start) in `sim_state`; date, hour and day are derived (no JS `Date`, no timezone bugs; Oman UTC+4 has no DST).
+* Daily demand per item = baseline × seasonality/event factor × seeded noise (unchanged rule); it is then spread over 24 hours by `demand.hourly_profile`
+  (whole parts exact, leftover units placed by seeded weighted draws) so the 24 amounts **sum exactly to the daily quantity**. Plans are stored in `demand_log`.
+* POs arrive at the hour given by the delivery window (`delivery.window_*`, deterministic per PO). A delayed PO arrives only at its new date and hour.
+  Receiving respects zone capacity (overflow into the overflow zone, otherwise partial receipt and retry).
+* Lots are usable until the end of `expiry.last_usable_hour` on their expiry date, then written off.
+
+### Clock control (server owns it)
+
+`POST /api/sim {action:"tick", expected, auto}`: the browser sends the tick it expects. A stale or duplicate request is **ignored**; auto ticks are also refused while paused or
+faster than the interval, so two tabs or a reload can never double-tick. The browser awaits each response before scheduling the next tick (no overlap). A reload resumes **paused**.
+*Run N hours / Next day / Next critical event* are server-side loops (capped by `sim.max_advance_hours`). **Auto-pause on critical** stops at the first critical event.
+
+## Decisions change the course of the process
+
+* **Approve PO**: committed to the budget immediately, placed with the item's real lead time, arrives at its date/hour (stock, movements, space change then). Quantity can be edited first.
+* **Reject / ignore**: nothing is ordered, the shortage can really worsen (stock-outs follow from the data). Undecided drafts show their age and escalate to an *overdue* alert (Critical when the stock-out is near).
+  A rejected draft is remembered with its time; it returns only after `repl.reject_cooldown_hours` or when cover fell below `repl.reopen_cover_drop` × the cover at rejection, and it says why.
+* **Space**: approving creates leases from `needed_from` for the requested months; rentable space drops from the start date, ends return the area, matching of other requests considers overlapping leases,
+  and an alert fires when stock growth endangers a commitment. You can approve, accept a split, modify the area, or reject.
+* **Manual**: emergency / manual PO (shorter lead time, price premium), manual stock movement (receipt / issue / adjustment with a mandatory reason), new space request. All audited in `decisions`.
+* **Decision impact log**: effects are computed from the event chain, movements and `demand_log`; nothing is written by hand.
+
+## Number audit
+
+* All formulas live in the pure module `lib/calc` (unit-tested). Components only format what they receive; "how is this calculated" popovers show formula, inputs (units, sources) and result.
+* Numerals follow the language (Arabic-Indic digits in Arabic), OMR with 3 decimals, units everywhere, never NaN / Infinity / `-0`.
+* `npm run audit` checks, at **every hour** of a 30-day run for 3 seeds (with scripted decisions): stock balance per lot and per item, no negative stock, budget committed/free and PO values vs the CSV and decisions,
+  zones (used = fixed + stock, rentable, no zone above capacity, sums), leases vs rentable (or an explicit alert), no duplicate pending recommendations, every decision timestamped with a consequence or an explicit "no effect",
+  clock consistency, UI numbers = independent SQL recomputation; **daily**: 24 hourly amounts = daily quantity for every item/day and issued = movements; plus day-0 = `docs/baseline.json`, same seed → same result, different seed → different result.
+* The **Data health** pill in the top bar shows the last audit; the button runs the same checks on the live database.
+* Hourly vs daily: `docs/hourly-vs-daily.md` (generated) and `docs/daily-engine-crosscheck.md` (verified against the previous engine, 22/24 items identical, the other two explained by stock-out/expiry).
+
+## Settings
+
+Every threshold, rate, schedule and profile lives in the `settings` table (seeded from `config/defaults.json`, shown and editable in the **Settings** screen). Business data
+(items, zones, suppliers, requests, budget) comes only from the CSV tables; UI text and message templates come from `locales/en.json` and `locales/ar.json`.
+
+| key | default | unit | description |
+|---|---|---|---|
+| `sim.start_date` | `"2026-10-05"` | date | Simulated 'today' at tick 0 (day 0, 00:00). The data dictionary states today = 2026-10-05. |
+| `sim.seed` | `42` | int | Seed of the deterministic random numbers (noise, hourly spreading, delivery hours). |
+| `sim.interval_ms` | `5000` | ms | Real milliseconds per simulated hour while running (default 5 s). |
+| `sim.min_interval_ms` | `200` | ms | Smallest allowed interval between ticks. |
+| `sim.interval_presets_ms` | `[500, 1000, 2000, 5000, 10000, 30000]` | ms | Speed presets shown in the top bar. |
+| `sim.auto_pause_critical` | `true` | bool | Pause the simulation when a critical event appears. |
+| `sim.max_advance_hours` | `720` | h | Upper limit for 'run N hours' / 'jump' actions. |
+| `sim.utc_offset_hours` | `4` | h | Display offset of the warehouse (Oman, UTC+4, no DST). The clock itself is an integer tick. |
+| `demand.noise` | `0.2` | ratio | Daily demand noise around the baseline (+/-). |
+| `demand.baseline_days` | `28` | days | History window (days before the last data day) used as the baseline usage. |
+| `demand.hourly_profile` | `[0.2, 0.2, 0.2, 0.2, 0.2, 0.4, 1, 3, 6, 8, 9, 9, 6, 7, 9,…` | weight | Relative demand per hour of day 0-23 (heavier in working hours, light at night). Normalised automatically. |
+| `demand.season` | `{"items": ["SKU-001", "SKU-006", "SKU-017"], "peak": 1.8,…` | json | Seasonal items and their peak multiplier: ramps up from ramp_start over ramp_days, holds until season_end, then eases off over decay_days. |
+| `demand.events` | `[{"item": "SKU-019", "factor": 3, "start": "2026-10-05", …` | json | One-off demand events (spike factor, days held at full factor, days to ease off). |
+| `demand.event_baseline` | `{"exclude_recent_days": 21, "window_days": 84}` | json | Baseline window for items with a demand event (the weeks before the spike). |
+| `forecast.recent_weeks` | `3` | weeks | Weeks compared in the anomaly test. |
+| `forecast.prior_weeks` | `12` | weeks | Reference weeks before the recent weeks. |
+| `forecast.anomaly_ratio` | `2` | x | Anomaly when recent weekly usage exceeds this multiple of the prior average. |
+| `forecast.anomaly_min_units` | `5` | units/wk | Ignore anomalies on very small volumes. |
+| `forecast.horizon_weeks` | `4` | weeks | Forecast horizon. |
+| `forecast.projection_days` | `90` | days | How far the stock-out projection looks. |
+| `status.critical_cover_weeks` | `1` | weeks | Critical when cover is below this and no PO arrives soon. |
+| `status.po_soon_days` | `3` | days | A PO arriving within this many days softens 'Critical' to 'Low'. |
+| `status.low_cover_weeks` | `2` | weeks | Low when cover is below this (or stock below safety stock). |
+| `thresholds.overstock_weeks` | `20` | weeks | Overstock status / alert above this cover. |
+| `thresholds.expiry_days` | `14` | days | Expiry alert / status window. |
+| `thresholds.expiry_high_days` | `7` | days | Expiry alert becomes High inside this window. |
+| `thresholds.expiry_critical_hours` | `24` | h | Expiry alert becomes Critical inside this many hours (when stock would be written off). |
+| `alerts.stockout_window_extra_days` | `7` | days | Stock-out alert when projected within lead time + this many days. |
+| `alerts.stockout_imminent_days` | `7` | days | Stock-out within this many days counts as imminent. |
+| `alerts.safety_category` | `"Safety gear"` | text | Item category treated as safety items. |
+| `alerts.alternatives` | `{"SKU-002": "SKU-001", "SKU-003": "SKU-004"}` | json | Temporary substitute item per item, used in supplier messages. |
+| `repl.review_days` | `14` | days | Review cycle added to the lead time in the reorder point. |
+| `repl.max_cover_weeks` | `12` | weeks | Never reorder above this cover. |
+| `repl.target_cover_days` | `56` | days | Order quantity covers lead time + this many days. |
+| `repl.shelf_life_cover_ratio` | `0.5` | ratio | For perishables the cover is limited to this share of the shelf life. |
+| `repl.round_to` | `{"kg": 10}` | json | Round order quantities up to a multiple per unit. |
+| `repl.priority_categories` | `["Safety gear", "Chemicals"]` | json | Categories ranked first inside a criticality class (after stock-out risk). |
+| `repl.reject_cooldown_hours` | `168` | h | A rejected PO draft is not proposed again before this many hours... |
+| `repl.reopen_cover_drop` | `0.5` | ratio | ...unless cover has fallen below this share of the cover at rejection (materially worse). |
+| `po.emergency_lead_factor` | `0.5` | ratio | Emergency POs use this share of the normal lead time (minimum 1 day). |
+| `po.emergency_premium` | `0.1` | ratio | Price premium on emergency purchase orders. |
+| `rec.escalate_hours` | `24` | h | A recommendation left pending this long raises an 'overdue' alert. |
+| `rec.escalate_critical_hours` | `12` | h | Overdue becomes Critical when the stock-out is closer than this. |
+| `space.overflow_zone` | `"Z5"` | zone | Zone that receives goods which do not fit in their home zone. |
+| `space.rentable_request_type` | `"general"` | text | Storage type of requests that can be served from rentable zones. |
+| `space.min_partial_share` | `0.25` | ratio | Below this share of the request no partial offer is made. |
+| `delivery.window_start_hour` | `8` | h | Deliveries arrive from this hour... |
+| `delivery.window_end_hour` | `16` | h | ...until this hour (exclusive). Each PO gets a deterministic hour inside the window. |
+| `delivery.retry_hours` | `24` | h | Remainder of a partially received PO is retried after this many hours. |
+| `expiry.last_usable_hour` | `23` | h | Lots are usable until the end of this hour on their expiry date; the rest is written off right after. |
+| `schedule.alerts_hours` | `[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16…` | hours | Hours at which the alert agent runs (cheap rules). |
+| `schedule.forecast_hours` | `[6]` | hours | Hours at which the forecast agent runs. |
+| `schedule.replenishment_hours` | `[8]` | hours | Hours at which the replenishment agent runs. |
+| `schedule.space_hours` | `[8]` | hours | Hours at which the space optimisation agent runs (also after stock-heavy events). |
+| `log.keep_agent_runs` | `400` | rows | Older agent_runs rows are pruned. |
+| `ui.feed_page_size` | `60` | rows | Rows per page in the live feed and logs ('load more'). |
+
+## Assumptions
+
+1. The repo already had a git history; the working tree was clean, so no "wip" snapshot commit was needed. The branch `feature/hourly-sim` was created from `main`; nothing is merged or pushed.
+2. The simulation starts at **5 Oct 2026 00:00** (setting `sim.start_date`, from the data dictionary). The 4 Oct gap day of the data is not back-filled; forecast windows use the last complete day (`data_end`).
+3. Day-0 numbers are unchanged: the forecast, reorder-point, usable-stock and stock-out maths keep day resolution at hour 0 and are made hour-aware afterwards (the rest of today counts only its remaining hours).
+4. The agent schedule hours are settings; "stock-out within N days" texts are given in hours.
+5. A supplier-message decision has **no simulated effect** (replies are not simulated) — this is stated explicitly in the impact log.
+6. Seasonality, demand events, alternatives, priority categories etc. are configuration (`config/defaults.json`), not code; item ids appear there because they are business configuration of the demo company.
+7. A lease starts at `max(needed_from, decision day)` and lasts the requested months (calendar months); area is held from the start date, not at approval.
+8. Emergency POs use `po.emergency_lead_factor` × lead time (min. 1 day) and a `po.emergency_premium`; exceeding the budget is allowed but flagged ("over budget").
+9. Receiving is limited by physical room (capacity − fixed − stock − active leases); the reserved buffer protects *rentable* space only. The data's `space_m2_per_unit` makes some zones fill quickly, so large POs arrive partially.
+10. Unit quantities are integers; manual adjustments are signed integers.
+11. Technical constants (not business numbers) remain in code: epsilon tolerances, the 0.8 factor of the "too soon" tick gate, the 400-day cap in the usable-stock horizon.

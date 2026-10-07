@@ -1,212 +1,231 @@
 import { db } from "../db";
 import { addDays, diffDays } from "../time";
-import { polish } from "../llm";
-import { getItems, getSim, logRun, logEvent, upsertRec, fmt, type AgentResult, type ForecastRow, type Item, type Lot, type Po, type Severity, uAr} from "../core";
+import { getSim, logRun, logEvent, upsertRec, M, type AgentResult, type Item, type Msg, type Severity } from "../core";
+import { loadSettings } from "../settings";
+import { loadLive } from "../live";
+import { holdingLeases, computeZones } from "./space";
 
-// Business knowledge: a temporary substitute the plant can run on while the preferred input is short.
-const ALTERNATIVES: Record<string, string> = { "SKU-002": "SKU-001", "SKU-003": "SKU-004" };
 const SEV_ORDER: Severity[] = ["Critical", "High", "Monitor", "Info"];
-export const OVERSTOCK_WEEKS = 20;
+const EVENT_SEV = { Critical: "critical", High: "high", Monitor: "info", Info: "info" } as const;
 
 interface A {
-  key: string; kind: string; item_id: string | null; severity: Severity; title_en: string; title_ar: string;
-  detail_en: string; detail_ar: string; rec_key?: string;
+  key: string; kind: string; item_id: string | null; severity: Severity; title: Msg; detail: Msg[]; ignore: Msg | null; rec_key?: string;
 }
+const hrs = (h: number) => Math.max(0, Math.round(h));
 
-/** Agent 4 (ACT): raises alerts and drafts supplier messages for critical/high supplier issues. */
-export async function alertAgent(group: string, useLlm: boolean): Promise<AgentResult> {
+/** Agent 4 (ACT): raises alerts (what / why / what happens if ignored) and drafts supplier messages for critical/high supplier issues. */
+export function alertAgent(group: string, trigger: string): AgentResult {
   const started = new Date().toISOString();
   const d = db();
-  const today = getSim().sim_date;
-  const items = getItems();
-  const byId = new Map(items.map((i) => [i.item_id, i]));
-  const fc = new Map((d.prepare(`SELECT * FROM forecasts`).all() as ForecastRow[]).map((f) => [f.item_id, f]));
-  const pos = d.prepare(`SELECT * FROM purchase_orders_open`).all() as Po[];
-  const open = pos.filter((p) => p.status === "OPEN" || p.status === "DELAYED_BY_SUPPLIER");
+  const cfg = loadSettings();
+  const sim = getSim();
+  const now = { date: sim.sim_date, hour: sim.hour };
+  const live = loadLive(cfg, now);
   const sup = new Map((d.prepare(`SELECT * FROM suppliers`).all() as { supplier_id: string; supplier_name: string }[]).map((s) => [s.supplier_id, s.supplier_name]));
+  const alts = cfg.j<Record<string, string>>("alerts.alternatives");
+  const extra = cfg.n("alerts.stockout_window_extra_days"), imminent = cfg.n("alerts.stockout_imminent_days");
+  const classes = [...new Set([...live.values()].map((l) => l.item.criticality))].sort();
   const alerts: A[] = [];
-  const msgs: { key: string; item: Item; payload: Record<string, unknown>; en: string; ar: string }[] = [];
+  const msgs: { key: string; item: Item; payload: Record<string, unknown> }[] = [];
 
-  const nm = (i: Item) => `${i.name_en} (${i.item_id})`;
-  const nmAr = (i: Item) => `${i.name_ar} (${i.item_id})`;
-
-  for (const it of items) {
-    const f = fc.get(it.item_id);
+  for (const l of live.values()) {
+    const it = l.item;
+    const f = l.fc;
     if (!f) continue;
-    const itemPos = open.filter((p) => p.item_id === it.item_id);
-    const delayed = itemPos.filter((p) => p.status === "DELAYED_BY_SUPPLIER");
-    const alt = ALTERNATIVES[it.item_id] ? byId.get(ALTERNATIVES[it.item_id]) : undefined;
+    const delayed = l.pos.filter((p) => p.status === "DELAYED_BY_SUPPLIER");
+    const alt = alts[it.item_id] ? live.get(alts[it.item_id]) : undefined;
+    const so = l.stockout;
+    const stockoutHours = l.onHand <= 0 ? 0 : so ? hrs(so.hours) : null;
 
     // --- stock-out risk (current or forecast) ---
-    let stockoutSev: Severity | null = null;
-    const expiryDriven = f.usable_qty < f.on_hand - 1; // the shortfall is caused by a lot expiring: covered by the expiry alert
-    if (f.on_hand <= 0) stockoutSev = "Critical";
-    else if (!expiryDriven && f.days_to_stockout !== null && f.days_to_stockout <= it.lead_time_days + 7) {
-      const imminent = f.days_to_stockout <= 7;
-      stockoutSev = it.criticality === "A" ? (imminent ? "Critical" : "High") : it.criticality === "B" ? (imminent ? "High" : "Monitor") : "Monitor";
+    let sev: Severity | null = null;
+    const expiryDriven = l.usable < l.onHand - 1; // shortfall caused by a lot expiring: covered by the expiry alert
+    if (l.onHand <= 0) sev = "Critical";
+    else if (!expiryDriven && so && so.days <= it.lead_time_days + extra) {
+      const soon = so.days <= imminent;
+      const rank = classes.indexOf(it.criticality); // 0 = most essential class
+      sev = rank === 0 ? (soon ? "Critical" : "High") : rank === 1 ? (soon ? "High" : "Monitor") : "Monitor";
     }
-    if (stockoutSev) {
-      const dts = f.on_hand <= 0 ? 0 : (f.days_to_stockout as number);
-      const seasonal = f.season_factor > 1.05;
+    if (sev) {
+      const detail: Msg[] = [M("alert.stockout.d1", { onhand: l.onHand, unit: it.unit, cover: l.cover, ss: it.safety_stock, lead: it.lead_time_days, crit: it.criticality })];
+      if (f.season_factor > 1.05) detail.push(M("alert.stockout.season", { factor: f.season_factor }));
+      if (delayed.length) detail.push(M("alert.stockout.delayed", { po: delayed[0].po_id, date: delayed[0].expected_arrival, hour: delayed[0].expected_hour }));
+      else if (l.pos.length) detail.push(M("alert.stockout.next_po", { date: l.pos[0].expected_arrival, hour: l.pos[0].expected_hour }));
+      else detail.push(M("alert.stockout.no_po"));
+      const draft = !delayed.length && (sev === "Critical" || sev === "High");
       alerts.push({
-        key: `STOCKOUT:${it.item_id}`, kind: "STOCKOUT", item_id: it.item_id, severity: stockoutSev,
-        title_en: f.on_hand <= 0 ? `Stockout – production stopped: ${nm(it)}` : `Stock-out risk in ${dts} day(s): ${nm(it)}`,
-        title_ar: f.on_hand <= 0 ? `نفاد المخزون — توقف الإنتاج: ${nmAr(it)}` : `خطر نفاد خلال ${dts} يوم: ${nmAr(it)}`,
-        detail_en: `On hand ${fmt(f.on_hand)} ${it.unit} = ${f.weeks_cover.toFixed(1)} weeks of cover (safety stock ${fmt(it.safety_stock)}, lead time ${it.lead_time_days}d, criticality ${it.criticality}).` +
-          `${seasonal ? ` Forecast includes the Oct–Mar season (x${f.season_factor.toFixed(2)}).` : ""}` +
-          `${delayed.length ? ` Open PO ${delayed[0].po_id} is delayed to ${delayed[0].expected_arrival}.` : itemPos.length ? ` Next PO arrives ${itemPos.map((p) => p.expected_arrival).sort()[0]}.` : " No open PO."}`,
-        detail_ar: `المتوفر ${fmt(f.on_hand)} ${uAr(it.unit)} = ${f.weeks_cover.toFixed(1)} أسبوع تغطية (مخزون الأمان ${fmt(it.safety_stock)}، مدة التوريد ${it.lead_time_days} يوم، الأهمية ${it.criticality}).` +
-          `${seasonal ? ` يتضمن التوقع موسم أكتوبر–مارس (×${f.season_factor.toFixed(2)}).` : ""}` +
-          `${delayed.length ? ` أمر الشراء ${delayed[0].po_id} متأخر حتى ${delayed[0].expected_arrival}.` : itemPos.length ? ` يصل أمر الشراء القادم ${itemPos.map((p) => p.expected_arrival).sort()[0]}.` : " لا يوجد أمر شراء مفتوح."}`,
-        rec_key: !delayed.length && (stockoutSev === "Critical" || stockoutSev === "High") ? `MSG:STOCKOUT:${it.item_id}` : undefined,
+        key: `STOCKOUT:${it.item_id}`, kind: "STOCKOUT", item_id: it.item_id, severity: sev,
+        title: l.onHand <= 0 ? M("alert.stockout_now.title", { item: it.item_id }) : M("alert.stockout.title", { hours: stockoutHours, item: it.item_id }),
+        detail, ignore: l.onHand <= 0 ? M("alert.ignore.stopped", { item: it.item_id }) : M("alert.ignore.stockout", { hours: stockoutHours, date: so?.date ?? "" }),
+        rec_key: draft ? `MSG:STOCKOUT:${it.item_id}` : undefined,
       });
-      if (!delayed.length && (stockoutSev === "Critical" || stockoutSev === "High")) {
-        const sName = sup.get(it.supplier_id) ?? it.supplier_id;
-        msgs.push({
-          key: `MSG:STOCKOUT:${it.item_id}`, item: it, payload: { item_id: it.item_id, supplier_id: it.supplier_id, supplier_name: sName, alert: "STOCKOUT" },
-          en: `Subject: Urgent supply request – ${it.name_en} (${it.item_id})\n\nDear ${sName} team,\n\nOur stock of ${it.name_en} is ${fmt(f.on_hand)} ${it.unit} (about ${f.weeks_cover.toFixed(1)} weeks of cover) and demand is rising with the season. ` +
-            `Please confirm the earliest delivery date and the quantity you can supply within ${it.lead_time_days} days, ideally with expedited shipping.\n\nBest regards,\nQeshour Procurement`,
-          ar: `الموضوع: طلب توريد عاجل — ${it.name_ar} (${it.item_id})\n\nالسادة فريق ${sName} المحترمين،\n\nمخزوننا من ${it.name_ar} هو ${fmt(f.on_hand)} ${uAr(it.unit)} (حوالي ${f.weeks_cover.toFixed(1)} أسبوع تغطية) والطلب في ازدياد مع الموسم. ` +
-            `نرجو تأكيد أقرب موعد تسليم والكمية التي يمكنكم توريدها خلال ${it.lead_time_days} أيام، ويفضّل بشحن مستعجل.\n\nمع التحية،\nمشتريات قشور`,
-        });
+      if (draft) {
+        msgs.push({ key: `MSG:STOCKOUT:${it.item_id}`, item: it, payload: {
+          kind: "stockout", item_id: it.item_id, supplier_id: it.supplier_id, supplier_name: sup.get(it.supplier_id) ?? it.supplier_id,
+          subject: M("sup.stockout.subject", { item: it.item_id }),
+          parts: [M("sup.stockout.body", { supplier: sup.get(it.supplier_id) ?? "", item: it.item_id, onhand: l.onHand, unit: it.unit, cover: l.cover, lead: it.lead_time_days })],
+        } });
       }
     }
 
     // --- delayed PO ---
     for (const p of delayed) {
-      const sev: Severity = stockoutSev === "Critical" || f.on_hand <= it.safety_stock ? "Critical" : "High";
+      const psev: Severity = sev === "Critical" || l.onHand <= it.safety_stock ? "Critical" : "High";
       const dueOrig = addDays(p.order_date, it.lead_time_days);
-      const gap = Math.max(0, diffDays(p.expected_arrival, today));
+      const gap = Math.max(0, diffDays(p.expected_arrival, now.date));
       const sName = sup.get(p.supplier_id) ?? p.supplier_id;
-      const days = f.days_to_stockout ?? 0;
+      const altLive = alt?.onHand ?? 0;
+      const detail: Msg[] = [M("alert.delay.d1", { po: p.po_id, order_date: p.order_date, due: dueOrig, gap, cover: l.cover })];
+      if (alt) detail.push(M("alert.delay.alt", { alt: alt.item.item_id, onhand: altLive, unit: alt.item.unit }));
       alerts.push({
-        key: `DELAY:${p.po_id}`, kind: "DELAYED_PO", item_id: it.item_id, severity: sev,
-        title_en: `Delayed PO ${p.po_id}: ${nm(it)} now arrives ${p.expected_arrival}`,
-        title_ar: `تأخّر أمر الشراء ${p.po_id}: ${nmAr(it)} سيصل ${p.expected_arrival}`,
-        detail_en: `Ordered ${p.order_date} (due about ${dueOrig}); supplier delay means ${gap} more day(s) without it. Stock lasts ${f.weeks_cover.toFixed(1)} weeks.` +
-          `${alt ? ` Temporary alternative: ${alt.name_en} (${alt.item_id}) – ${fmt(fc.get(alt.item_id)?.on_hand ?? 0)} ${alt.unit} on hand.` : ""}`,
-        detail_ar: `تم الطلب ${p.order_date} (الاستحقاق نحو ${dueOrig}); تأخر المورّد يعني ${gap} يوماً إضافياً دون هذا الصنف. المخزون يكفي ${f.weeks_cover.toFixed(1)} أسبوع.` +
-          `${alt ? ` بديل مؤقت: ${alt.name_ar} (${alt.item_id}) – المتوفر ${fmt(fc.get(alt.item_id)?.on_hand ?? 0)} ${uAr(alt.unit)}.` : ""}`,
+        key: `DELAY:${p.po_id}`, kind: "DELAYED_PO", item_id: it.item_id, severity: psev,
+        title: M("alert.delay.title", { po: p.po_id, item: it.item_id, date: p.expected_arrival, hour: p.expected_hour }),
+        detail, ignore: so ? M("alert.ignore.delay", { hours: stockoutHours, date: p.expected_arrival }) : M("alert.ignore.delay_ok", { date: p.expected_arrival }),
         rec_key: `MSG:${p.po_id}`,
       });
-      msgs.push({
-        key: `MSG:${p.po_id}`, item: it, payload: { item_id: it.item_id, supplier_id: p.supplier_id, supplier_name: sName, po_id: p.po_id, alternative: alt?.item_id ?? null },
-        en: `Subject: Urgent follow-up – delayed PO ${p.po_id} (${it.name_en})\n\nDear ${sName} team,\n\nOur order ${p.po_id} for ${fmt(p.quantity)} ${it.unit} of ${it.name_en}, placed on ${p.order_date}, is now shown as delayed to ${p.expected_arrival}. ` +
-          `Our current stock is only ${fmt(f.on_hand)} ${it.unit} (about ${f.weeks_cover.toFixed(1)} weeks of cover)${days ? ` and production would stop in about ${days} day(s)` : ""}.\n\n` +
-          `Please (1) confirm a firm delivery date, and (2) ship a partial delivery of the first available quantity immediately.` +
-          `${alt ? `\n\nAs a temporary alternative we can also take ${alt.name_en} (${alt.item_id}); please quote availability and lead time.` : ""}\n\nBest regards,\nQeshour Procurement`,
-        ar: `الموضوع: متابعة عاجلة — تأخّر أمر الشراء ${p.po_id} (${it.name_ar})\n\nالسادة فريق ${sName} المحترمين،\n\nأمر الشراء ${p.po_id} بكمية ${fmt(p.quantity)} ${uAr(it.unit)} من ${it.name_ar} المُقدَّم بتاريخ ${p.order_date} ظهر الآن متأخراً حتى ${p.expected_arrival}. ` +
-          `مخزوننا الحالي ${fmt(f.on_hand)} ${uAr(it.unit)} فقط (حوالي ${f.weeks_cover.toFixed(1)} أسبوع تغطية)${days ? ` وسيتوقف الإنتاج خلال نحو ${days} يوم` : ""}.\n\n` +
-          `نرجو (1) تأكيد موعد تسليم نهائي، و(2) شحن دفعة جزئية من الكمية المتاحة فوراً.` +
-          `${alt ? `\n\nوكبديل مؤقت يمكننا استلام ${alt.name_ar} (${alt.item_id})؛ نرجو إفادتنا بالتوفر ومدة التوريد.` : ""}\n\nمع التحية،\nمشتريات قشور`,
-      });
+      const parts: Msg[] = [M("sup.delay.body", {
+        supplier: sName, po: p.po_id, qty: p.quantity, unit: it.unit, item: it.item_id, order_date: p.order_date, eta: p.expected_arrival,
+        onhand: l.onHand, cover: l.cover, hours: stockoutHours ?? 0,
+      })];
+      if (alt) parts.push(M("sup.delay.alt", { alt: alt.item.item_id }));
+      msgs.push({ key: `MSG:${p.po_id}`, item: it, payload: {
+        kind: "delay", item_id: it.item_id, supplier_id: p.supplier_id, supplier_name: sName, po_id: p.po_id, alternative: alt?.item.item_id ?? null,
+        subject: M("sup.delay.subject", { po: p.po_id, item: it.item_id }), parts,
+      } });
     }
 
     // --- demand anomaly ---
     if (f.anomaly) {
       alerts.push({
         key: `ANOMALY:${it.item_id}`, kind: "ANOMALY", item_id: it.item_id, severity: "High",
-        title_en: `Demand anomaly x${f.anomaly_ratio.toFixed(1)}: ${nm(it)}`, title_ar: `شذوذ في الطلب ×${f.anomaly_ratio.toFixed(1)}: ${nmAr(it)}`,
-        detail_en: `Last 3 weeks average ${f.last3_avg.toFixed(0)}/wk vs ${f.prior12_avg.toFixed(0)}/wk over the prior 12 weeks. Only ${fmt(f.on_hand)} ${it.unit} on hand${itemPos.length ? `; ${fmt(itemPos.reduce((a, p) => a + p.quantity, 0))} ${it.unit} on order` : ""}.`,
-        detail_ar: `متوسط آخر 3 أسابيع ${f.last3_avg.toFixed(0)}/أسبوع مقابل ${f.prior12_avg.toFixed(0)}/أسبوع للـ 12 أسبوعاً السابقة. المتوفر ${fmt(f.on_hand)} ${uAr(it.unit)} فقط${itemPos.length ? `؛ و${fmt(itemPos.reduce((a, p) => a + p.quantity, 0))} ${uAr(it.unit)} قيد الطلب` : ""}.`,
+        title: M("alert.anomaly.title", { ratio: f.anomaly_ratio, item: it.item_id }),
+        detail: [M("alert.anomaly.d1", { last: f.last3_avg, prior: f.prior12_avg, weeks: cfg.n("forecast.recent_weeks"), pweeks: cfg.n("forecast.prior_weeks"), onhand: l.onHand, unit: it.unit }),
+          ...(l.pos.length ? [M("alert.anomaly.onorder", { qty: l.pos.reduce((a, p) => a + p.quantity, 0), unit: it.unit })] : [])],
+        ignore: so ? M("alert.ignore.stockout", { hours: stockoutHours, date: so.date }) : M("alert.ignore.cover", { cover: l.cover }),
       });
     }
 
     // --- overstock ---
-    if (f.weeks_cover > OVERSTOCK_WEEKS) {
+    if (l.cover > cfg.n("thresholds.overstock_weeks")) {
       alerts.push({
         key: `OVERSTOCK:${it.item_id}`, kind: "OVERSTOCK", item_id: it.item_id, severity: "Info",
-        title_en: `Overstock (${f.weeks_cover > 99 ? ">99" : f.weeks_cover.toFixed(0)} weeks): ${nm(it)}`, title_ar: `مخزون زائد (${f.weeks_cover > 99 ? ">99" : f.weeks_cover.toFixed(0)} أسبوع): ${nmAr(it)}`,
-        detail_en: `${fmt(f.on_hand)} ${it.unit} on hand (${fmt(f.on_hand * it.unit_cost_omr)} OMR tied up). Never reordered; consider pausing purchases.`,
-        detail_ar: `المتوفر ${fmt(f.on_hand)} ${uAr(it.unit)} (${fmt(f.on_hand * it.unit_cost_omr)} ر.ع مجمّدة). لن يُعاد طلبه؛ يُنصح بإيقاف الشراء.`,
+        title: M("alert.overstock.title", { cover: l.cover, item: it.item_id }),
+        detail: [M("alert.overstock.d1", { onhand: l.onHand, unit: it.unit, value: l.onHand * it.unit_cost_omr })],
+        ignore: M("alert.ignore.overstock", { value: l.onHand * it.unit_cost_omr }),
       });
     }
 
-    // --- expiry within 14 days ---
-    const lots = d.prepare(`SELECT * FROM current_stock WHERE item_id=? AND quantity_on_hand>0 AND expiry_date IS NOT NULL`).all(it.item_id) as Lot[];
-    for (const l of lots) {
-      const days = diffDays(l.expiry_date as string, today);
-      if (days > 14 || days < 0) continue;
-      const daily = f.daily_forecast;
-      const atRisk = Math.max(0, l.quantity_on_hand - daily * (days + 1));
+    // --- expiry ---
+    for (const lot of l.lots) {
+      if (!lot.expiry_date) continue;
+      const days = diffDays(lot.expiry_date, now.date);
+      if (days > cfg.n("thresholds.expiry_days") || days < 0) continue;
+      const hoursLeft = days * 24 + cfg.n("expiry.last_usable_hour") + 1 - now.hour;
+      const atRisk = Math.max(0, lot.quantity_on_hand - (f.daily_forecast * hoursLeft) / 24);
+      const esev: Severity = hoursLeft < cfg.n("thresholds.expiry_critical_hours") && atRisk > 0 ? "Critical" : days <= cfg.n("thresholds.expiry_high_days") ? "High" : "Monitor";
       alerts.push({
-        key: `EXPIRY:${l.lot_id}`, kind: "EXPIRY", item_id: it.item_id, severity: days <= 7 ? "High" : "Monitor",
-        title_en: `Expiring in ${days} day(s): ${nm(it)} lot ${l.lot_id}`, title_ar: `ينتهي خلال ${days} يوم: ${nmAr(it)} الدفعة ${l.lot_id}`,
-        detail_en: `${fmt(l.quantity_on_hand)} ${it.unit} expire on ${l.expiry_date}. At current usage about ${fmt(atRisk)} ${it.unit} (${fmt(atRisk * it.unit_cost_omr)} OMR) will be written off unless used, sold or redirected.`,
-        detail_ar: `${fmt(l.quantity_on_hand)} ${uAr(it.unit)} تنتهي صلاحيتها في ${l.expiry_date}. بمعدل الاستهلاك الحالي سيُشطب نحو ${fmt(atRisk)} ${uAr(it.unit)} (${fmt(atRisk * it.unit_cost_omr)} ر.ع) ما لم تُستخدم أو تُباع أو يُعاد توجيهها.`,
+        key: `EXPIRY:${lot.lot_id}`, kind: "EXPIRY", item_id: it.item_id, severity: esev,
+        title: M("alert.expiry.title", { days, hours: hoursLeft, item: it.item_id, lot: lot.lot_id }),
+        detail: [M("alert.expiry.d1", { qty: lot.quantity_on_hand, unit: it.unit, date: lot.expiry_date, risk: atRisk, value: atRisk * it.unit_cost_omr })],
+        ignore: M("alert.ignore.expiry", { qty: atRisk, unit: it.unit, value: atRisk * it.unit_cost_omr, date: lot.expiry_date }),
       });
     }
 
     // --- safety items low ---
-    if (it.category === "Safety gear" && f.on_hand < it.safety_stock) {
+    if (it.category === cfg.s("alerts.safety_category") && l.onHand < it.safety_stock) {
+      const sName = sup.get(it.supplier_id) ?? it.supplier_id;
       alerts.push({
-        key: `SAFETY:${it.item_id}`, kind: "SAFETY_LOW", item_id: it.item_id, severity: f.on_hand <= 0 ? "Critical" : "High",
-        title_en: `Safety item below safety stock: ${nm(it)}`, title_ar: `معدات سلامة دون مخزون الأمان: ${nmAr(it)}`,
-        detail_en: `${fmt(f.on_hand)} ${it.unit} on hand vs safety stock ${fmt(it.safety_stock)}. Operating without safety gear is a compliance risk.`,
-        detail_ar: `المتوفر ${fmt(f.on_hand)} ${uAr(it.unit)} مقابل مخزون الأمان ${fmt(it.safety_stock)}. التشغيل دون معدات السلامة مخاطرة امتثال.`,
+        key: `SAFETY:${it.item_id}`, kind: "SAFETY_LOW", item_id: it.item_id, severity: l.onHand <= 0 ? "Critical" : "High",
+        title: M("alert.safety.title", { item: it.item_id }),
+        detail: [M("alert.safety.d1", { onhand: l.onHand, unit: it.unit, ss: it.safety_stock })],
+        ignore: M("alert.ignore.safety", { hours: stockoutHours ?? 0 }),
         rec_key: `MSG:SAFETY:${it.item_id}`,
       });
-      const sName = sup.get(it.supplier_id) ?? it.supplier_id;
-      msgs.push({
-        key: `MSG:SAFETY:${it.item_id}`, item: it, payload: { item_id: it.item_id, supplier_id: it.supplier_id, supplier_name: sName, alert: "SAFETY_LOW" },
-        en: `Subject: Priority order – ${it.name_en}\n\nDear ${sName} team,\n\nOur stock of ${it.name_en} (${it.item_id}) is ${fmt(f.on_hand)} ${it.unit}, below our safety level of ${fmt(it.safety_stock)}. Please prioritise our next order and confirm the delivery date.\n\nBest regards,\nQeshour Procurement`,
-        ar: `الموضوع: طلب ذو أولوية — ${it.name_ar}\n\nالسادة فريق ${sName} المحترمين،\n\nمخزوننا من ${it.name_ar} (${it.item_id}) هو ${fmt(f.on_hand)} ${uAr(it.unit)}، أقل من مستوى الأمان ${fmt(it.safety_stock)}. نرجو إعطاء أولوية لطلبنا القادم وتأكيد موعد التسليم.\n\nمع التحية،\nمشتريات قشور`,
+      msgs.push({ key: `MSG:SAFETY:${it.item_id}`, item: it, payload: {
+        kind: "safety", item_id: it.item_id, supplier_id: it.supplier_id, supplier_name: sName,
+        subject: M("sup.safety.subject", { item: it.item_id }),
+        parts: [M("sup.safety.body", { supplier: sName, item: it.item_id, onhand: l.onHand, unit: it.unit, ss: it.safety_stock })],
+      } });
+    }
+  }
+
+  // --- zone over capacity (safeguard: receiving never lets this happen) ---
+  for (const z of computeZones().filter((x) => x.over_capacity > 1)) {
+    alerts.push({ key: `SPACE_OVER:${z.zone_id}`, kind: "SPACE_OVER", item_id: null, severity: "High", title: M("alert.space_over.title", { zone: z.zone_id, over: z.over_capacity }),
+      detail: [M("alert.space_over.d1")], ignore: null });
+  }
+
+  // --- lease commitments at risk: approved/active leases exceed what stock still leaves rentable ---
+  const leases = holdingLeases().filter((x) => x.end_date > now.date);
+  for (const z of computeZones().filter((x) => x.rent_allowed)) {
+    const mine = leases.filter((x) => x.zone_id === z.zone_id);
+    const committed = mine.reduce((s, x) => s + x.area, 0);
+    if (committed > z.rentable + 1e-6) {
+      const anyActive = mine.some((x) => x.status === "ACTIVE");
+      alerts.push({
+        key: `LEASE_RISK:${z.zone_id}`, kind: "LEASE_RISK", item_id: null, severity: anyActive ? "Critical" : "High",
+        title: M("alert.lease_risk.title", { zone: z.zone_id, short: committed - z.rentable }),
+        detail: [M("alert.lease_risk.d1", { committed, rentable: z.rentable, list: mine.map((x) => `${x.request_id}|${Math.round(x.area)}|${x.start_date}`).join(",") })],
+        ignore: M("alert.ignore.lease_risk", { short: committed - z.rentable }),
       });
     }
   }
 
-  // --- zone over capacity (stock + fixed area exceeds the zone) ---
-  const zs = d.prepare(`SELECT z.zone_id, z.over_capacity, w.zone_name FROM zone_space z JOIN warehouse_zones w ON w.zone_id=z.zone_id WHERE z.over_capacity>1`).all() as
-    { zone_id: string; over_capacity: number; zone_name: string }[];
-  for (const z of zs) {
+  // --- recommendations left undecided too long ---
+  const escalate = cfg.n("rec.escalate_hours"), escCrit = cfg.n("rec.escalate_critical_hours");
+  for (const r of d.prepare(`SELECT key, item_id, payload, created_tick FROM recommendations WHERE kind='PO' AND status='PENDING'`).all() as
+    { key: string; item_id: string; payload: string; created_tick: number }[]) {
+    const age = sim.tick - r.created_tick;
+    if (age < escalate) continue;
+    const l = live.get(r.item_id);
+    const p = JSON.parse(r.payload);
+    const so = l?.onHand && l.onHand > 0 ? l.stockout : null;
+    const critical = l ? l.onHand <= 0 || (so !== null && so.hours < escCrit) : false;
     alerts.push({
-      key: `SPACE_OVER:${z.zone_id}`, kind: "SPACE_OVER", item_id: null, severity: "High",
-      title_en: `Zone ${z.zone_id} is ${fmt(z.over_capacity)} m² over capacity`, title_ar: `المنطقة ${z.zone_id} تتجاوز السعة بمقدار ${fmt(z.over_capacity)} م²`,
-      detail_en: `Stock held in ${z.zone_name} needs more area than the zone has (incoming purchase orders). Rentable space there is 0; consider redirecting receipts to overflow zone Z5 or pausing orders.`,
-      detail_ar: `المخزون في ${z.zone_name} يحتاج مساحة أكبر مما تملكه المنطقة (بسبب أوامر الشراء الواردة). المساحة القابلة للتأجير هناك صفر؛ يُنصح بتحويل الاستلام إلى منطقة الفائض Z5 أو إيقاف الطلبات.`,
+      key: `OVERDUE:${r.key}`, kind: "DECISION_OVERDUE", item_id: r.item_id, severity: critical ? "Critical" : "High",
+      title: M("alert.overdue.title", { item: r.item_id, hours: age }),
+      detail: [M("alert.overdue.d1", { qty: p.qty, unit: p.unit, cost: p.cost })],
+      ignore: so ? M("alert.ignore.stockout", { hours: hrs(so.hours), date: so.date }) : M("alert.ignore.stopped", { item: r.item_id }),
     });
   }
 
-  // ---- persist alerts (new ones also become events) ----
+  // ---- persist alerts (new / escalated ones also become events) ----
   const existing = new Map((d.prepare(`SELECT key, severity, active FROM alerts`).all() as { key: string; severity: string; active: number }[]).map((r) => [r.key, r]));
   const seen = new Set<string>();
   let newCount = 0;
+  const st = { ins: d.prepare(`INSERT INTO alerts(key,kind,item_id,severity,title,detail,ignore_msg,rec_key,active,first_tick,updated_tick) VALUES(?,?,?,?,?,?,?,?,1,?,?)`),
+    upd: d.prepare(`UPDATE alerts SET severity=?,title=?,detail=?,ignore_msg=?,rec_key=?,active=1,updated_tick=?,first_tick=CASE WHEN active=0 THEN ? ELSE first_tick END WHERE key=?`) };
   for (const a of alerts) {
     seen.add(a.key);
     const ex = existing.get(a.key);
+    const j = [JSON.stringify(a.title), JSON.stringify(a.detail), a.ignore ? JSON.stringify(a.ignore) : null];
     if (!ex) {
-      d.prepare(`INSERT INTO alerts(key,kind,item_id,severity,title_en,title_ar,detail_en,detail_ar,rec_key,active,first_sim_date,updated_sim_date)
-        VALUES(?,?,?,?,?,?,?,?,?,1,?,?)`).run(a.key, a.kind, a.item_id, a.severity, a.title_en, a.title_ar, a.detail_en, a.detail_ar, a.rec_key ?? null, today, today);
+      st.ins.run(a.key, a.kind, a.item_id, a.severity, ...j, a.rec_key ?? null, sim.tick, sim.tick);
       newCount++;
-      if (a.severity !== "Info") logEvent("ALERT", a.item_id, a.title_ar, a.title_en, a.severity === "Critical" ? "critical" : a.severity === "High" ? "high" : "info");
+      if (a.severity !== "Info") logEvent("ALERT", a.item_id, a.title, EVENT_SEV[a.severity], { ref: a.key });
     } else {
-      d.prepare(`UPDATE alerts SET severity=?,title_en=?,title_ar=?,detail_en=?,detail_ar=?,rec_key=?,active=1,updated_sim_date=? WHERE key=?`)
-        .run(a.severity, a.title_en, a.title_ar, a.detail_en, a.detail_ar, a.rec_key ?? null, today, a.key);
-      if (!ex.active || (ex.severity !== a.severity && SEV_ORDER.indexOf(a.severity) < SEV_ORDER.indexOf(ex.severity as Severity))) {
-        if (a.severity === "Critical" || a.severity === "High") logEvent("ALERT", a.item_id, a.title_ar, a.title_en, a.severity === "Critical" ? "critical" : "high");
-      }
+      st.upd.run(a.severity, ...j, a.rec_key ?? null, sim.tick, sim.tick, a.key);
+      const rose = SEV_ORDER.indexOf(a.severity) < SEV_ORDER.indexOf(ex.severity as Severity);
+      if ((!ex.active || rose) && (a.severity === "Critical" || a.severity === "High")) logEvent("ALERT", a.item_id, a.title, EVENT_SEV[a.severity], { ref: a.key });
     }
   }
-  for (const [key, r] of existing) if (!seen.has(key) && r.active) d.prepare(`UPDATE alerts SET active=0,updated_sim_date=? WHERE key=?`).run(today, key);
+  for (const [key, r] of existing) if (!seen.has(key) && r.active) d.prepare(`UPDATE alerts SET active=0,updated_tick=? WHERE key=?`).run(sim.tick, key);
 
-  // ---- supplier message drafts (only for critical/high issues) ----
+  // ---- supplier message drafts (only for critical/high issues; stable key, updated in place) ----
   const keepMsg = new Set<string>();
   for (const m of msgs) {
     const sev = alerts.find((a) => a.rec_key === m.key)?.severity;
     if (sev !== "Critical" && sev !== "High") continue;
-    const text = useLlm ? await polish(m.en, m.ar) : { en: m.en, ar: m.ar };
-    const status = upsertRec(m.key, "SUPPLIER_MSG", m.item.item_id, null, { ...m.payload, body_en: text.en, body_ar: text.ar });
-    if (status === "PENDING") keepMsg.add(m.key);
+    const prev = d.prepare(`SELECT payload FROM recommendations WHERE key=? AND status='PENDING'`).get(m.key) as { payload: string } | undefined;
+    const override = prev ? JSON.parse(prev.payload).body_override : undefined; // wording polished by the optional LLM stays
+    if (upsertRec(m.key, "SUPPLIER_MSG", m.item.item_id, null, { ...m.payload, body_override: override }) === "PENDING") keepMsg.add(m.key);
   }
   for (const r of d.prepare(`SELECT key FROM recommendations WHERE kind='SUPPLIER_MSG' AND status='PENDING'`).all() as { key: string }[]) {
     if (!keepMsg.has(r.key)) d.prepare(`DELETE FROM recommendations WHERE key=?`).run(r.key);
   }
 
   const count = (s: Severity) => alerts.filter((a) => a.severity === s).length;
-  const res: AgentResult = {
-    en: `${alerts.length} active alert(s): ${count("Critical")} critical, ${count("High")} high, ${count("Monitor")} monitor, ${count("Info")} info (${newCount} new). ${keepMsg.size} supplier message draft(s) awaiting approval.`,
-    ar: `${alerts.length} تنبيه نشط: ${count("Critical")} حرج، ${count("High")} مرتفع، ${count("Monitor")} متابعة، ${count("Info")} معلومة (${newCount} جديد). ${keepMsg.size} مسودة رسالة للمورّدين بانتظار الموافقة.`,
-  };
-  logRun(group, "alerts", started, res.en, res.ar);
+  const res: AgentResult = { msg: M("run.alerts", { total: alerts.length, critical: count("Critical"), high: count("High"), monitor: count("Monitor"), info: count("Info"), fresh: newCount, drafts: keepMsg.size }) };
+  logRun(group, "alerts", trigger, started, res.msg);
   return res;
 }
