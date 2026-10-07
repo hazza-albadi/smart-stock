@@ -1,0 +1,659 @@
+{
+  "generated_by": "scripts/baseline.ts",
+  "commands": [
+    {
+      "name": "typecheck",
+      "command": "npx tsc --noEmit",
+      "exit_code": 0,
+      "ok": true
+    },
+    {
+      "name": "build",
+      "command": "npm run build",
+      "exit_code": 0,
+      "ok": true
+    },
+    {
+      "name": "check",
+      "command": "npx tsx scripts/check.ts",
+      "exit_code": 0,
+      "ok": true
+    }
+  ],
+  "day0": {
+    "sim": "2026-10-05",
+    "zones": [
+      {
+        "zone_id": "Z1",
+        "capacity": 4000,
+        "fixed": 540,
+        "stock_used": 2459.9995,
+        "used": 2999.9995,
+        "reserved": 500,
+        "rent_allowed": 1,
+        "free": 500.0005,
+        "rentable": 500,
+        "allocated": 0,
+        "over_capacity": 0
+      },
+      {
+        "zone_id": "Z2",
+        "capacity": 2500,
+        "fixed": 305.9,
+        "stock_used": 1394.1468,
+        "used": 1700.0468,
+        "reserved": 200,
+        "rent_allowed": 0,
+        "free": 599.9532,
+        "rentable": 0,
+        "allocated": 0,
+        "over_capacity": 0
+      },
+      {
+        "zone_id": "Z3",
+        "capacity": 1000,
+        "fixed": 144,
+        "stock_used": 655.9656,
+        "used": 799.9656,
+        "reserved": 0,
+        "rent_allowed": 0,
+        "free": 200.0344,
+        "rentable": 0,
+        "allocated": 0,
+        "over_capacity": 0
+      },
+      {
+        "zone_id": "Z4",
+        "capacity": 500,
+        "fixed": 54,
+        "stock_used": 245.9992,
+        "used": 299.9992,
+        "reserved": 0,
+        "rent_allowed": 0,
+        "free": 200.0008,
+        "rentable": 0,
+        "allocated": 0,
+        "over_capacity": 0
+      },
+      {
+        "zone_id": "Z5",
+        "capacity": 2000,
+        "fixed": 126,
+        "stock_used": 573.9892,
+        "used": 699.9892,
+        "reserved": 400,
+        "rent_allowed": 1,
+        "free": 900.0108,
+        "rentable": 900,
+        "allocated": 0,
+        "over_capacity": 0
+      }
+    ],
+    "rentable_by_zone": {
+      "Z1": 500,
+      "Z5": 900
+    },
+    "rentable_total": 1400,
+    "budget": {
+      "total": 18000,
+      "committed": 14011.5,
+      "free": 3988.5
+    },
+    "forecasts": [
+      {
+        "item_id": "SKU-001",
+        "weekly_usage": 454,
+        "base_weekly": 454,
+        "prior12_avg": 487.75,
+        "last3_avg": 436.666667,
+        "anomaly": 0,
+        "anomaly_ratio": 0.895267,
+        "season_factor": 1.585683,
+        "on_hand": 1240,
+        "weeks_cover": 2.731278
+      },
+      {
+        "item_id": "SKU-002",
+        "weekly_usage": 578.5,
+        "base_weekly": 578.5,
+        "prior12_avg": 586.5,
+        "last3_avg": 582.333333,
+        "anomaly": 0,
+        "anomaly_ratio": 0.992896,
+        "season_factor": 1,
+        "on_hand": 170,
+        "weeks_cover": 0.293863
+      },
+      {
+        "item_id": "SKU-003",
+        "weekly_usage": 123.5,
+        "base_weekly": 123.5,
+        "prior12_avg": 124.583333,
+        "last3_avg": 128.333333,
+        "anomaly": 0,
+        "anomaly_ratio": 1.0301,
+        "season_factor": 1,
+        "on_hand": 718,
+        "weeks_cover": 5.813765
+      },
+      {
+        "item_id": "SKU-004",
+        "weekly_usage": 252.75,
+        "base_weekly": 252.75,
+        "prior12_avg": 241.25,
+        "last3_avg": 245.666667,
+        "anomaly": 0,
+        "anomaly_ratio": 1.018307,
+        "season_factor": 1.000198,
+        "on_hand": 1207,
+        "weeks_cover": 4.77547
+      },
+      {
+        "item_id": "SKU-005",
+        "weekly_usage": 22,
+        "base_weekly": 22,
+        "prior12_avg": 24.333333,
+        "last3_avg": 23,
+        "anomaly": 0,
+        "anomaly_ratio": 0.945205,
+        "season_factor": 1,
+        "on_hand": 610,
+        "weeks_cover": 27.727273
+      },
+      {
+        "item_id": "SKU-006",
+        "weekly_usage": 11,
+        "base_weekly": 11,
+        "prior12_avg": 10.916667,
+        "last3_avg": 10.333333,
+        "anomaly": 0,
+        "anomaly_ratio": 0.946565,
+        "season_factor": 1.586364,
+        "on_hand": 21,
+        "weeks_cover": 1.909091
+      },
+      {
+        "item_id": "SKU-007",
+        "weekly_usage": 15.5,
+        "base_weekly": 15.5,
+        "prior12_avg": 14,
+        "last3_avg": 15.666667,
+        "anomaly": 0,
+        "anomaly_ratio": 1.119048,
+        "season_factor": 1,
+        "on_hand": 34,
+        "weeks_cover": 2.193548
+      },
+      {
+        "item_id": "SKU-008",
+        "weekly_usage": 9.5,
+        "base_weekly": 9.5,
+        "prior12_avg": 9.333333,
+        "last3_avg": 9.333333,
+        "anomaly": 0,
+        "anomaly_ratio": 1,
+        "season_factor": 1,
+        "on_hand": 34,
+        "weeks_cover": 3.578947
+      },
+      {
+        "item_id": "SKU-009",
+        "weekly_usage": 5.75,
+        "base_weekly": 5.75,
+        "prior12_avg": 6.083333,
+        "last3_avg": 5.666667,
+        "anomaly": 0,
+        "anomaly_ratio": 0.931507,
+        "season_factor": 0.991304,
+        "on_hand": 27,
+        "weeks_cover": 4.695652
+      },
+      {
+        "item_id": "SKU-010",
+        "weekly_usage": 4.5,
+        "base_weekly": 4.5,
+        "prior12_avg": 4.833333,
+        "last3_avg": 4.666667,
+        "anomaly": 0,
+        "anomaly_ratio": 0.965517,
+        "season_factor": 1,
+        "on_hand": 25,
+        "weeks_cover": 5.555556
+      },
+      {
+        "item_id": "SKU-011",
+        "weekly_usage": 221,
+        "base_weekly": 221,
+        "prior12_avg": 219.083333,
+        "last3_avg": 211.333333,
+        "anomaly": 0,
+        "anomaly_ratio": 0.964625,
+        "season_factor": 1,
+        "on_hand": 630,
+        "weeks_cover": 2.850679
+      },
+      {
+        "item_id": "SKU-012",
+        "weekly_usage": 7.25,
+        "base_weekly": 7.25,
+        "prior12_avg": 7.666667,
+        "last3_avg": 7.666667,
+        "anomaly": 0,
+        "anomaly_ratio": 1,
+        "season_factor": 1.006897,
+        "on_hand": 22,
+        "weeks_cover": 3.034483
+      },
+      {
+        "item_id": "SKU-013",
+        "weekly_usage": 6.5,
+        "base_weekly": 6.5,
+        "prior12_avg": 5.5,
+        "last3_avg": 6.333333,
+        "anomaly": 0,
+        "anomaly_ratio": 1.151515,
+        "season_factor": 1,
+        "on_hand": 20,
+        "weeks_cover": 3.076923
+      },
+      {
+        "item_id": "SKU-014",
+        "weekly_usage": 40.5,
+        "base_weekly": 40.5,
+        "prior12_avg": 43.916667,
+        "last3_avg": 41.666667,
+        "anomaly": 0,
+        "anomaly_ratio": 0.948767,
+        "season_factor": 1,
+        "on_hand": 78,
+        "weeks_cover": 1.925926
+      },
+      {
+        "item_id": "SKU-015",
+        "weekly_usage": 5.25,
+        "base_weekly": 5.25,
+        "prior12_avg": 5.416667,
+        "last3_avg": 5,
+        "anomaly": 0,
+        "anomaly_ratio": 0.923077,
+        "season_factor": 1.009524,
+        "on_hand": 30,
+        "weeks_cover": 5.714286
+      },
+      {
+        "item_id": "SKU-016",
+        "weekly_usage": 8.25,
+        "base_weekly": 8.25,
+        "prior12_avg": 7.916667,
+        "last3_avg": 7.666667,
+        "anomaly": 0,
+        "anomaly_ratio": 0.968421,
+        "season_factor": 1.006061,
+        "on_hand": 33,
+        "weeks_cover": 4
+      },
+      {
+        "item_id": "SKU-017",
+        "weekly_usage": 41.5,
+        "base_weekly": 41.5,
+        "prior12_avg": 46.333333,
+        "last3_avg": 42.333333,
+        "anomaly": 0,
+        "anomaly_ratio": 0.913669,
+        "season_factor": 1.585542,
+        "on_hand": 94,
+        "weeks_cover": 2.26506
+      },
+      {
+        "item_id": "SKU-018",
+        "weekly_usage": 15.5,
+        "base_weekly": 15.5,
+        "prior12_avg": 17.083333,
+        "last3_avg": 15,
+        "anomaly": 0,
+        "anomaly_ratio": 0.878049,
+        "season_factor": 1,
+        "on_hand": 128,
+        "weeks_cover": 8.258065
+      },
+      {
+        "item_id": "SKU-019",
+        "weekly_usage": 70.25,
+        "base_weekly": 70.25,
+        "prior12_avg": 29.333333,
+        "last3_avg": 82,
+        "anomaly": 1,
+        "anomaly_ratio": 2.795455,
+        "season_factor": 1.000712,
+        "on_hand": 40,
+        "weeks_cover": 0.569395
+      },
+      {
+        "item_id": "SKU-020",
+        "weekly_usage": 80,
+        "base_weekly": 80,
+        "prior12_avg": 77.166667,
+        "last3_avg": 76.333333,
+        "anomaly": 0,
+        "anomaly_ratio": 0.989201,
+        "season_factor": 1,
+        "on_hand": 90,
+        "weeks_cover": 1.125
+      },
+      {
+        "item_id": "SKU-021",
+        "weekly_usage": 0.25,
+        "base_weekly": 0.25,
+        "prior12_avg": 0.583333,
+        "last3_avg": 0,
+        "anomaly": 0,
+        "anomaly_ratio": 0,
+        "season_factor": 0.8,
+        "on_hand": 32,
+        "weeks_cover": 128
+      },
+      {
+        "item_id": "SKU-022",
+        "weekly_usage": 2.25,
+        "base_weekly": 2.25,
+        "prior12_avg": 1.583333,
+        "last3_avg": 2,
+        "anomaly": 0,
+        "anomaly_ratio": 1.263158,
+        "season_factor": 1.022222,
+        "on_hand": 61,
+        "weeks_cover": 27.111111
+      },
+      {
+        "item_id": "SKU-023",
+        "weekly_usage": 11.25,
+        "base_weekly": 11.25,
+        "prior12_avg": 10.833333,
+        "last3_avg": 11,
+        "anomaly": 0,
+        "anomaly_ratio": 1.015385,
+        "season_factor": 1.004444,
+        "on_hand": 252,
+        "weeks_cover": 22.4
+      },
+      {
+        "item_id": "SKU-024",
+        "weekly_usage": 19,
+        "base_weekly": 19,
+        "prior12_avg": 18.916667,
+        "last3_avg": 19.333333,
+        "anomaly": 0,
+        "anomaly_ratio": 1.022026,
+        "season_factor": 1,
+        "on_hand": 104,
+        "weeks_cover": 5.473684
+      }
+    ],
+    "plan": [
+      {
+        "item_id": "SKU-002",
+        "rank": 1,
+        "qty": 4030,
+        "cost": 1007.5,
+        "status": "FUNDED",
+        "rop": 1820.214286,
+        "position": 1270
+      },
+      {
+        "item_id": "SKU-008",
+        "rank": 2,
+        "qty": 72,
+        "cost": 1008,
+        "status": "FUNDED",
+        "rop": 48,
+        "position": 34
+      },
+      {
+        "item_id": "SKU-016",
+        "rank": 3,
+        "qty": 60,
+        "cost": 660,
+        "status": "FUNDED",
+        "rop": 43,
+        "position": 33
+      },
+      {
+        "item_id": "SKU-001",
+        "rank": 4,
+        "qty": 2370,
+        "cost": 829.5,
+        "status": "PARTIAL",
+        "rop": 2362.457143,
+        "position": 1240
+      },
+      {
+        "item_id": "SKU-011",
+        "rank": 5,
+        "qty": 1446,
+        "cost": 1735.2,
+        "status": "DEFERRED",
+        "rop": 749.857143,
+        "position": 630
+      },
+      {
+        "item_id": "SKU-003",
+        "rank": 6,
+        "qty": 210,
+        "cost": 63,
+        "status": "FUNDED",
+        "rop": 435.214286,
+        "position": 105.857143
+      },
+      {
+        "item_id": "SKU-013",
+        "rank": 7,
+        "qty": 46,
+        "cost": 1150,
+        "status": "DEFERRED",
+        "rop": 26.285714,
+        "position": 20
+      },
+      {
+        "item_id": "SKU-005",
+        "rank": 99,
+        "qty": 0,
+        "cost": 0,
+        "status": "OVERSTOCK",
+        "rop": 0,
+        "position": 610
+      },
+      {
+        "item_id": "SKU-021",
+        "rank": 99,
+        "qty": 0,
+        "cost": 0,
+        "status": "OVERSTOCK",
+        "rop": 0,
+        "position": 32
+      },
+      {
+        "item_id": "SKU-022",
+        "rank": 99,
+        "qty": 0,
+        "cost": 0,
+        "status": "OVERSTOCK",
+        "rop": 0,
+        "position": 61
+      },
+      {
+        "item_id": "SKU-023",
+        "rank": 99,
+        "qty": 0,
+        "cost": 0,
+        "status": "OVERSTOCK",
+        "rop": 0,
+        "position": 252
+      }
+    ],
+    "alerts": [
+      {
+        "key": "ANOMALY:SKU-019",
+        "kind": "ANOMALY",
+        "item_id": "SKU-019",
+        "severity": "High"
+      },
+      {
+        "key": "DELAY:PO-002-260914",
+        "kind": "DELAYED_PO",
+        "item_id": "SKU-002",
+        "severity": "Critical"
+      },
+      {
+        "key": "EXPIRY:LOT-003-A",
+        "kind": "EXPIRY",
+        "item_id": "SKU-003",
+        "severity": "High"
+      },
+      {
+        "key": "OVERSTOCK:SKU-005",
+        "kind": "OVERSTOCK",
+        "item_id": "SKU-005",
+        "severity": "Info"
+      },
+      {
+        "key": "OVERSTOCK:SKU-021",
+        "kind": "OVERSTOCK",
+        "item_id": "SKU-021",
+        "severity": "Info"
+      },
+      {
+        "key": "OVERSTOCK:SKU-022",
+        "kind": "OVERSTOCK",
+        "item_id": "SKU-022",
+        "severity": "Info"
+      },
+      {
+        "key": "OVERSTOCK:SKU-023",
+        "kind": "OVERSTOCK",
+        "item_id": "SKU-023",
+        "severity": "Info"
+      },
+      {
+        "key": "STOCKOUT:SKU-001",
+        "kind": "STOCKOUT",
+        "item_id": "SKU-001",
+        "severity": "High"
+      },
+      {
+        "key": "STOCKOUT:SKU-002",
+        "kind": "STOCKOUT",
+        "item_id": "SKU-002",
+        "severity": "Critical"
+      }
+    ],
+    "space_proposals": [
+      {
+        "request_id": "REQ-01",
+        "decision": "APPROVE",
+        "area_m2": 600,
+        "allocations": [
+          {
+            "zone_id": "Z5",
+            "area": 600
+          }
+        ]
+      },
+      {
+        "request_id": "REQ-02",
+        "decision": "REJECT",
+        "area_m2": 0,
+        "allocations": []
+      },
+      {
+        "request_id": "REQ-03",
+        "decision": "REJECT",
+        "area_m2": 0,
+        "allocations": []
+      },
+      {
+        "request_id": "REQ-04",
+        "decision": "PARTIAL",
+        "area_m2": 900,
+        "allocations": [
+          {
+            "zone_id": "Z5",
+            "area": 900
+          }
+        ]
+      },
+      {
+        "request_id": "REQ-05",
+        "decision": "APPROVE",
+        "area_m2": 450,
+        "allocations": [
+          {
+            "zone_id": "Z1",
+            "area": 450
+          }
+        ]
+      }
+    ],
+    "recommendations": [
+      {
+        "kind": "SUPPLIER_MSG",
+        "key": "MSG:PO-002-260914",
+        "status": "PENDING"
+      },
+      {
+        "kind": "SUPPLIER_MSG",
+        "key": "MSG:STOCKOUT:SKU-001",
+        "status": "PENDING"
+      },
+      {
+        "kind": "PO",
+        "key": "PO:SKU-001",
+        "status": "PENDING"
+      },
+      {
+        "kind": "PO",
+        "key": "PO:SKU-002",
+        "status": "PENDING"
+      },
+      {
+        "kind": "PO",
+        "key": "PO:SKU-003",
+        "status": "PENDING"
+      },
+      {
+        "kind": "PO",
+        "key": "PO:SKU-008",
+        "status": "PENDING"
+      },
+      {
+        "kind": "PO",
+        "key": "PO:SKU-016",
+        "status": "PENDING"
+      },
+      {
+        "kind": "SPACE",
+        "key": "SPACE:REQ-01",
+        "status": "PENDING"
+      },
+      {
+        "kind": "SPACE",
+        "key": "SPACE:REQ-02",
+        "status": "PENDING"
+      },
+      {
+        "kind": "SPACE",
+        "key": "SPACE:REQ-03",
+        "status": "PENDING"
+      },
+      {
+        "kind": "SPACE",
+        "key": "SPACE:REQ-04",
+        "status": "PENDING"
+      },
+      {
+        "kind": "SPACE",
+        "key": "SPACE:REQ-05",
+        "status": "PENDING"
+      }
+    ]
+  }
+}
