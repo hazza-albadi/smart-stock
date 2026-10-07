@@ -8,7 +8,7 @@ export default function PendingPanel() {
   const pending = snap.recs.filter((r) => r.status === "PENDING").sort((a, b) => b.age_hours - a.age_hours);
   return (
     <section id="pending" className="card scroll-mt-28" aria-label={T("pendingTitle")}>
-      <CardHead title={T("pendingTitle")} sub={T("pendingSub")} right={<span className="num rounded-full bg-surface2 px-2.5 py-0.5 text-xs font-semibold">{N(pending.length)}</span>} />
+      <CardHead title={T("pendingTitle")} sub={T("pendingSub")} right={<span className="flex items-center gap-2">{pending.some((r) => r.overdue) && <Pill tone="Critical">{N(pending.filter((r) => r.overdue).length)} {T("overdue")}</Pill>}<span className="num rounded-full bg-surface2 px-2.5 py-0.5 text-xs font-semibold">{N(pending.length)}</span></span>} />
       <ul className="scroll-thin max-h-[360px] divide-y divide-line overflow-y-auto">
         {pending.length === 0 && <li className="p-4 text-center text-sm text-muted">{T("pendingNone")}</li>}
         {pending.map((r) => {

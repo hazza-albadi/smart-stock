@@ -11,6 +11,10 @@ const EVENT_SEV = { Critical: "critical", High: "high", Monitor: "info", Info: "
 interface A {
   key: string; kind: string; item_id: string | null; severity: Severity; title: Msg; detail: Msg[]; ignore: Msg | null; rec_key?: string;
 }
+/** Only genuinely critical situations pause the simulation: expiry inside 24 h and a delayed critical PO (a real stock-out is logged by the engine). */
+const PAUSE_KINDS = ["EXPIRY", "DELAYED_PO"];
+const evSeverity = (a: { kind: string; severity: Severity }) => (a.kind === "DECISION_OVERDUE" ? "high" : EVENT_SEV[a.severity]);
+const evOpts = (a: { key: string; kind: string; severity: Severity }) => ({ ref: a.key, meta: { pause: a.severity === "Critical" && PAUSE_KINDS.includes(a.kind) } });
 const hrs = (h: number) => Math.max(0, Math.round(h));
 
 /** Agent 4 (ACT): raises alerts (what / why / what happens if ignored) and drafts supplier messages for critical/high supplier issues. */
@@ -202,11 +206,11 @@ export function alertAgent(group: string, trigger: string): AgentResult {
     if (!ex) {
       st.ins.run(a.key, a.kind, a.item_id, a.severity, ...j, a.rec_key ?? null, sim.tick, sim.tick);
       newCount++;
-      if (a.severity !== "Info") logEvent("ALERT", a.item_id, a.title, EVENT_SEV[a.severity], { ref: a.key });
+      if (a.severity !== "Info") logEvent("ALERT", a.item_id, a.title, evSeverity(a), evOpts(a));
     } else {
       st.upd.run(a.severity, ...j, a.rec_key ?? null, sim.tick, sim.tick, a.key);
       const rose = SEV_ORDER.indexOf(a.severity) < SEV_ORDER.indexOf(ex.severity as Severity);
-      if ((!ex.active || rose) && (a.severity === "Critical" || a.severity === "High")) logEvent("ALERT", a.item_id, a.title, EVENT_SEV[a.severity], { ref: a.key });
+      if ((!ex.active || rose) && (a.severity === "Critical" || a.severity === "High")) logEvent("ALERT", a.item_id, a.title, evSeverity(a), evOpts(a));
     }
   }
   for (const [key, r] of existing) if (!seen.has(key) && r.active) d.prepare(`UPDATE alerts SET active=0,updated_tick=? WHERE key=?`).run(sim.tick, key);

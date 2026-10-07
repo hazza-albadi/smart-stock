@@ -143,6 +143,8 @@ export function dailyInvariants(): Check[] {
   }
   add("hourly_amounts_sum_to_daily_quantity", [...bad, ...(profileSum > 0 ? [] : ["hourly profile sums to zero"])]);
   add("issued_demand_equals_movements", bad2);
+  // replenishment caps orders by room: agent POs must arrive in full (no held remainder / blocked receipt)
+  add("agent_pos_arrive_fully", all(`SELECT e.type, e.ref FROM events e JOIN purchase_orders_open p ON p.po_id=REPLACE(e.ref, '', '') WHERE e.type IN ('PO_HELD','RECEIVING_BLOCKED') AND p.source='AGENT' AND p.emergency=0`).map((r) => `${r.type} ${r.ref}`));
   add("planned_never_below_issued", all(`SELECT day, item_id, hour FROM demand_log WHERE issued > planned`).map((r) => `${r.item_id} d${r.day} h${r.hour}`));
   return out;
 }

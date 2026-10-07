@@ -81,7 +81,7 @@ export default function TopBar(p: Props) {
         </div>
       </div>
       <nav className="mx-auto flex max-w-[1500px] gap-4 overflow-x-auto px-4 pb-2 text-xs font-semibold text-muted" aria-label="sections">
-        {["pending", "alerts", "space", "plan", "impact", "agents", "manual", "settings"].map((a) => <a key={a} href={`#${a}`} className="whitespace-nowrap hover:text-brand">{T(`nav.${a}`)}</a>)}
+        {["pending", "alerts", "space", "plan", "impact", "agents", "manual", "settings"].map((a) => <a key={a} href={`#${a}`} className="whitespace-nowrap hover:text-brand">{T(`nav.${a}`)}{a === "pending" && snap.recs.some((r) => r.overdue) && <span className="ms-1 rounded-full bg-crit px-1.5 text-[10px] font-bold text-white">{N(snap.recs.filter((r) => r.overdue).length)}</span>}</a>)}
       </nav>
     </header>
   );

@@ -416,5 +416,7 @@
  "impact.e.manual_stock": "→ stock of {item:item} is now {to:n0} ({sign:sgn}{qty:n0})",
  "impact.e.manual_stock_none": "→ stock was not changed",
  "impact.e.request_proposal": "→ space matching proposed a decision for it immediately",
- "fmt.ongoing": " (still stopped)"
+ "fmt.ongoing": " (still stopped)",
+ "repl.r.staged": "Staged order: only {room:n0} {unit:unit} of the {need:n0} needed fit in the zone by the time it arrives; the remaining {rest:n0} will be proposed again as room frees up.",
+ "repl.r.noroom": "Deferred: there is no room in the zone for {need:n0} {unit:unit} by the time an order would arrive (stock, incoming POs and leases take the space)."
 }

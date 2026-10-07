@@ -393,8 +393,8 @@
       {
         "item_id": "SKU-002",
         "rank": 1,
-        "qty": 4030,
-        "cost": 1007.5,
+        "qty": 520,
+        "cost": 130,
         "status": "FUNDED",
         "rop": 1820.214286,
         "position": 1270
@@ -402,8 +402,8 @@
       {
         "item_id": "SKU-008",
         "rank": 2,
-        "qty": 72,
-        "cost": 1008,
+        "qty": 62,
+        "cost": 868,
         "status": "FUNDED",
         "rop": 48,
         "position": 34
@@ -420,9 +420,9 @@
       {
         "item_id": "SKU-001",
         "rank": 4,
-        "qty": 2370,
-        "cost": 829.5,
-        "status": "PARTIAL",
+        "qty": 3170,
+        "cost": 1109.5,
+        "status": "FUNDED",
         "rop": 2362.457143,
         "position": 1240
       },
@@ -440,7 +440,7 @@
         "rank": 6,
         "qty": 210,
         "cost": 63,
-        "status": "FUNDED",
+        "status": "DEFERRED",
         "rop": 435.214286,
         "position": 105.857143
       },
@@ -449,7 +449,7 @@
         "rank": 7,
         "qty": 46,
         "cost": 1150,
-        "status": "DEFERRED",
+        "status": "FUNDED",
         "rop": 26.285714,
         "position": 20
       },
@@ -616,12 +616,12 @@
       },
       {
         "kind": "PO",
-        "key": "PO:SKU-003",
+        "key": "PO:SKU-008",
         "status": "PENDING"
       },
       {
         "kind": "PO",
-        "key": "PO:SKU-008",
+        "key": "PO:SKU-013",
         "status": "PENDING"
       },
       {

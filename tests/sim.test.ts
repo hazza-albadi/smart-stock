@@ -149,3 +149,40 @@ test("manual actions are audited and go through the same agents", () => {
   assert.equal(q(`SELECT COUNT(*) n FROM decisions WHERE actor='user'`)[0].n >= 5, true);
   assert.deepEqual(runInvariants(true).filter((c) => !c.ok), []);
 });
+
+test("replenishment caps orders by zone room: the cold-zone item gets a staged, realistic order that arrives in full", () => {
+  fresh();
+  const rec = q(`SELECT id, item_id, payload FROM recommendations WHERE kind='PO' AND status='PENDING' AND item_id IN (SELECT item_id FROM alerts WHERE kind='STOCKOUT' AND severity='Critical')`)[0];
+  const p = JSON.parse(rec.payload);
+  const it = q(`SELECT * FROM items WHERE item_id=?`, rec.item_id)[0];
+  assert.equal(it.storage_type, "cold");
+  assert.ok(p.room.staged, "order is staged because the full quantity does not fit");
+  assert.ok(p.qty < p.room.need);
+  assert.ok(p.qty * it.space_m2_per_unit < 1000, "fits inside the cold zone capacity");
+  assert.ok(p.reason.some((m: any) => m.k === "repl.r.staged"), "the reason says why");
+  decide(rec.id, "APPROVED");
+  advance({ hours: 24 * 8 });
+  const po = q(`SELECT po_id FROM purchase_orders_open WHERE rec_key LIKE ?`, `PO:${rec.item_id}%`)[0];
+  assert.equal(q(`SELECT COUNT(*) n FROM events WHERE ref=? AND type IN ('PO_HELD','PO_OVERFLOW','RECEIVING_BLOCKED')`, po.po_id)[0].n, 0, "arrived in full");
+  assert.equal(q(`SELECT SUM(quantity) s FROM stock_movements WHERE reference=? AND movement_type='IN'`, po.po_id)[0].s, p.qty);
+  // no agent draft ever needs more room than the zones can take
+  for (const r of q(`SELECT item_id, payload FROM recommendations WHERE kind='PO' AND source='agent'`)) assert.ok(JSON.parse(r.payload).qty >= 1);
+});
+
+test("auto-pause: real stock-out pauses once; overdue-decision alerts and projected risks do not pause", () => {
+  seedDatabase();
+  runAll({ group: "start", trigger: "start" });
+  setSetting("sim.auto_pause_critical", true);
+  // nothing critical in the first hours: overdue and projected-risk alerts must not pause
+  const r = advance({ hours: 30 });
+  assert.equal(r.ticks, 30, "no pause during 30 hours although drafts became overdue");
+  assert.ok(snapshot().recs.some((x) => x.overdue));
+  assert.ok(q(`SELECT 1 FROM alerts WHERE kind='DECISION_OVERDUE' AND active=1`).length > 0);
+  assert.equal(q(`SELECT COUNT(*) n FROM events WHERE type='ALERT' AND ref LIKE 'OVERDUE:%' AND json_extract(meta,'$.pause')=1`)[0].n, 0);
+  // the first real stock-out pauses
+  const r2 = advance({ untilCritical: true });
+  assert.ok(r2.paused && r2.critical.length >= 1);
+  assert.ok((r2.critical as any[]).every((e) => e.type === "STOCKOUT" || e.ref?.startsWith("EXPIRY") || e.ref?.startsWith("DELAY")));
+  const ev = q(`SELECT COUNT(*) n FROM events WHERE type='STOCKOUT' AND item_id=?`, (r2.critical as any[])[0].item_id)[0].n;
+  assert.equal(ev, 1, "once per event");
+});

@@ -96,7 +96,7 @@ function processHour(cfg: Settings, tick: number, items: Item[]) {
       // one stock-out event per episode (until the next receipt)
       const lastIn = (d.prepare(`SELECT MAX(tick) m FROM stock_movements WHERE item_id=? AND movement_type='IN' AND sim=1`).get(it.item_id) as { m: number | null }).m ?? -1;
       const already = d.prepare(`SELECT 1 FROM events WHERE type='STOCKOUT' AND item_id=? AND tick>=?`).get(it.item_id, lastIn);
-      if (!already || before > 0) logEvent("STOCKOUT", it.item_id, M("ev.stockout", { item: it.item_id }), "critical", { ref: it.item_id });
+      if (!already || before > 0) logEvent("STOCKOUT", it.item_id, M("ev.stockout", { item: it.item_id }), "critical", { ref: it.item_id, meta: { pause: true } });
     }
   }
 }
@@ -137,7 +137,7 @@ export function tick(o: { expected?: number; auto?: boolean } = {}): TickResult 
     FROM stock_movements m JOIN items i ON i.item_id=m.item_id WHERE m.seq>? ORDER BY m.seq`).all(lastSeq);
   const events = (d.prepare(`SELECT * FROM events WHERE id>? ORDER BY id`).all(lastEvent) as { severity: string; msg: string; meta: string | null }[])
     .map((e) => ({ ...e, msg: JSON.parse(e.msg), meta: e.meta ? JSON.parse(e.meta) : null }));
-  const critical = events.filter((e) => e.severity === "critical");
+  const critical = events.filter((e) => (e.meta as { pause?: boolean } | null)?.pause === true); // once per event: events are logged once
   let paused = false;
   if (critical.length && cfg.b("sim.auto_pause_critical")) { d.prepare(`UPDATE sim_state SET running=0 WHERE id=1`).run(); paused = true; }
   const n = getSim();
