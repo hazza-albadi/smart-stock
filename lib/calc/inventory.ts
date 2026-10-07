@@ -21,6 +21,9 @@ export function demandOver(m: DemandModel, now: Now, hours: number): number {
   return total;
 }
 
+/** Hours the on-hand stock lasts at the weekly usage (null when nothing is used). */
+export const coverHours = (onHand: number, weeklyUsage: number) => (weeklyUsage > 0 ? (onHand / weeklyUsage) * 168 : null);
+
 export const coverWeeks = (onHand: number, weeklyUsage: number) => (weeklyUsage > 0 ? onHand / weeklyUsage : NO_USAGE_COVER);
 
 /** Stock that FEFO consumption will actually use before each lot expires (the rest would be written off). */

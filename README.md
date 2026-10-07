@@ -25,19 +25,23 @@ npm run dev      # http://localhost:3000
 
 Optional: `ANTHROPIC_API_KEY` lets a model polish supplier-message wording when you press **Run analysis** (numbers stay deterministic).
 
-## 2-minute demo script (hourly)
+## Screen layout (answers three questions, in this order)
+1. **Needs your decision** — one card per suggestion (order, supplier message, storage request) with *why*, *if you approve*, *if you do nothing*, one big action button, Reject and Postpone. Undo toast after every decision.
+2. **What is at risk** — four key numbers (with ⓘ formulas) and the risk list (details on click).
+3. **What happened recently** — live movements and the stock table.
+Everything else is in the tabbed **More** card: storage space, purchase plan, what happened after your decisions, automatic checks, do-it-yourself actions, settings and data check.
+The sticky top bar shows the date/time, running/paused and why, the speed in words, Start/Pause, +1 hour, Speed ▾ and More ▾ menus, Help (tour, 2-minute demo, glossary), language and theme.
 
-1. Open the page: **Mon 5 Oct 2026 – 00:00**, 4 items at risk, **3,988.500 OMR** free, **1,400 m²** rentable. Speed is *1 hour = 5 s*; auto-pause is on.
-2. Press **Play**. Each tick is one hour: movements appear in the feed, stock rows flash. Change the speed (0.5 s … 30 s or custom) while it runs — nothing is lost.
-3. Frozen shrimp shells (≈49 h of stock) hit zero on 7 Oct: the simulation **auto-pauses** with a red banner "Stockout – production stopped".
-4. Open **Pending decisions** (note the ages, "overdue" after 24 h) and the SKU-002 alert: *what happened · since when · why · what the system proposes · what happens if you ignore it*.
-   Edit the quantity of the PO draft, press **Approve**: budget is committed *now*, the PO appears with its **arrival date and hour**.
-5. **Reject** another draft (e.g. respirator masks) — it is remembered and not re-proposed every hour; it comes back only after the cooldown or when much worse, with the reason.
-6. Press **Next day** / **Run 6 hours** / **Next critical event**. Watch the approved PO arrive at its hour (event feed, stock, space).
-7. In **Warehouse space** approve REQ-01 (lease reserved from its start date) and reject REQ-03. Rentable space drops only when the lease starts; the other proposals are recalculated.
-8. Open **Decision impact log**: every decision with its effects ("You approved PO … → arrived 10 Oct 14:00 … but SKU-002 had already stocked out … production stopped for 55 h").
-9. Click any **ⓘ** next to a number to see its formula, inputs and sources. Press **Data health** to run the invariant checks on the live database.
-10. **Reset** restores the start state (your settings are kept).
+## 2-minute demo script (also inside the app: Help → 2-minute demo)
+
+1. Open the page: **Mon 5 Oct 2026 – 00:00**. Read "Needs your decision" and "What is at risk". A first-run tour explains the screen (skippable).
+2. Press **Start** (Speed ▾ lets you change *1 hour = 5 seconds*). Movements appear under "What happened recently".
+3. Frozen shrimp shells run out on 7 Oct: the clock **pauses itself** and says "Paused: critical event – decide now".
+4. In "Needs your decision" press the green button of the frozen-shrimp order. A toast offers **Undo**. The order arrives at its hour later; the budget drops now.
+5. **Reject** another order and keep running: the shortage grows because nothing was ordered; the suggestion comes back only after the waiting time or when clearly worse.
+6. **More ▾ → Jump to next day**, watch the delivery arrive. Open **Storage space**, approve a customer request, watch the free space change when the rental starts.
+7. Open **After your decisions**: each decision with what it led to, in plain sentences. Click any **ⓘ** to see how a number is calculated, any **?** for a definition.
+8. **More ▾ → Start over** (asks for confirmation) restores the starting situation.
 
 ## Agent schedule (configurable in Settings)
 
@@ -76,6 +80,10 @@ faster than the interval, so two tabs or a reload can never double-tick. The bro
 * **Manual**: emergency / manual PO (shorter lead time, price premium), manual stock movement (receipt / issue / adjustment with a mandatory reason), new space request. All audited in `decisions`.
 * **Decision impact log**: effects are computed from the event chain, movements and `demand_log`; nothing is written by hand.
 
+## UX notes
+* No layout jitter while running (measured, `docs/ux/jitter-before.md` / `jitter-after.md`): per-panel subscriptions with structural sharing, fixed-height scroll cards, fixed overlays, transform-only feed animation, one request queue and sequence-numbered snapshots.
+* Walkthrough with before/after screenshots: `docs/ux/walkthrough.md`.
+
 ## Number audit
 
 * All formulas live in the pure module `lib/calc` (unit-tested). Components only format what they receive; "how is this calculated" popovers show formula, inputs (units, sources) and result.
@@ -89,7 +97,7 @@ faster than the interval, so two tabs or a reload can never double-tick. The bro
 ## Settings
 
 Every threshold, rate, schedule and profile lives in the `settings` table (seeded from `config/defaults.json`, shown and editable in the **Settings** screen). Business data
-(items, zones, suppliers, requests, budget) comes only from the CSV tables; UI text and message templates come from `locales/en.json` and `locales/ar.json`.
+(items, zones, suppliers, requests, budget) comes only from the CSV tables; UI text and message templates come from `locales/en.json` and `locales/ar.json`, generated by `python scripts/locales_messages.py && python scripts/locales_ui.py && python scripts/locales_wording.py` (the last script holds the plain-language wording and wins). Messages are stored as `{key, vars}` and rendered in the chosen language, so numerals, units and names follow the language toggle. `npm test` fails if a text is typed in a component, a key is missing in one language, or an internal term appears in the English texts.
 
 | key | default | unit | description |
 |---|---|---|---|

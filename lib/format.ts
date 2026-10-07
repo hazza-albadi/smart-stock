@@ -27,3 +27,6 @@ export const dateShort = (lang: Lang, iso: string) =>
   new Intl.DateTimeFormat(loc(lang), { day: "numeric", month: "short", timeZone: "UTC" }).format(utc(iso));
 export const clock = (lang: Lang, hour: number) => `${num(lang, Math.floor(hour), 0).padStart(2, lang === "ar" ? "٠" : "0")}:${num(lang, 0, 0).repeat(2)}`;
 export const dateTime = (lang: Lang, iso: string, hour: number) => `${dateShort(lang, iso)} ${clock(lang, hour)}`;
+
+/** Plural category of a count in the given language (Arabic has zero/one/two/few/many/other). */
+export const pluralCat = (lang: Lang, n: number) => new Intl.PluralRules(lang === "ar" ? "ar" : "en").select(Math.round(n));

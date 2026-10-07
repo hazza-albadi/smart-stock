@@ -3,7 +3,7 @@ import { diffDays } from "./time";
 import { getSim, type Lot } from "./core";
 import { loadSettings } from "./settings";
 import { loadLive } from "./live";
-import { statusOf, ex, demandOver, type Explain, type Status } from "./calc";
+import { statusOf, ex, demandOver, coverHours, type Explain, type Status } from "./calc";
 import { budgetInfo } from "./agents/replenishment";
 import { AGENT_ORDER } from "./agents/coordinator";
 import { computeZones } from "./agents/space";
@@ -11,6 +11,7 @@ import { llmEnabled } from "./llm";
 
 export type { Status };
 export interface Rec {
+  snoozed: boolean;
   id: number; key: string; kind: "PO" | "SUPPLIER_MSG" | "SPACE"; item_id: string | null; request_id: string | null;
   status: "PENDING" | "APPROVED" | "REJECTED"; payload: any; created_tick: number; decided_tick: number | null; source: string;
   reopen_count: number; age_hours: number; overdue: boolean;
@@ -19,7 +20,10 @@ export interface Rec {
 const all = (sql: string, ...a: unknown[]): any[] => db().prepare(sql).all(...a);
 
 /** One JSON document with everything the dashboard shows. Every business number comes from SQLite through lib/calc; the UI only formats it. */
+const g = globalThis as unknown as { __sssseq?: number };
+
 export function snapshot() {
+  g.__sssseq = (g.__sssseq ?? 0) + 1; // monotonic: the browser ignores a snapshot older than the one it shows
   const cfg = loadSettings();
   const sim = getSim();
   const now = { date: sim.sim_date, hour: sim.hour };
@@ -28,7 +32,7 @@ export function snapshot() {
     .map((a): Record<string, any> => ({ ...a, title: JSON.parse(a.title), detail: JSON.parse(a.detail), ignore_msg: a.ignore_msg ? JSON.parse(a.ignore_msg) : null, since_tick: a.first_tick }));
   const escalate = cfg.n("rec.escalate_hours");
   const recs: Rec[] = all(`SELECT * FROM recommendations ORDER BY id`).map((r) => ({
-    ...r, payload: JSON.parse(r.payload), age_hours: sim.tick - r.created_tick, overdue: r.status === "PENDING" && sim.tick - r.created_tick >= escalate,
+    ...r, payload: JSON.parse(r.payload), age_hours: sim.tick - r.created_tick, snoozed: (JSON.parse(r.payload).snooze_until ?? 0) > sim.tick, overdue: r.status === "PENDING" && sim.tick - r.created_tick >= escalate && !((JSON.parse(r.payload).snooze_until ?? 0) > sim.tick),
   }) as Rec);
 
   const st = { criticalCover: cfg.n("status.critical_cover_weeks"), poSoonDays: cfg.n("status.po_soon_days"), lowCover: cfg.n("status.low_cover_weeks"), overstock: cfg.n("thresholds.overstock_weeks") };
@@ -62,7 +66,7 @@ export function snapshot() {
     return {
       item_id: it.item_id, name_ar: it.name_ar, name_en: it.name_en, category: it.category, unit: it.unit, zone_id: it.zone_id,
       criticality: it.criticality, crit_rank: classes.indexOf(it.criticality), unit_cost: it.unit_cost_omr, safety_stock: it.safety_stock, lead_time_days: it.lead_time_days,
-      on_hand: l.onHand, usable: l.usable, weekly_usage: l.weeklyUsage, weeks_cover: l.cover, status, anomaly: !!f?.anomaly,
+      on_hand: l.onHand, usable: l.usable, lasts_hours: l.onHand <= 0 ? 0 : coverHours(l.onHand, l.weeklyUsage), weekly_usage: l.weeklyUsage, weeks_cover: l.cover, status, anomaly: !!f?.anomaly,
       anomaly_ratio: f?.anomaly_ratio ?? 0, season_factor: f?.season_factor ?? 1, stockout_date: l.stockout?.date ?? null,
       stockout_hours: l.onHand <= 0 ? 0 : l.stockout?.hours ?? null, expiry,
       po: next ? { po_id: next.po_id, qty: next.quantity, eta: next.expected_arrival, hour: next.expected_hour, delayed: next.status === "DELAYED_BY_SUPPLIER" } : null,
@@ -115,8 +119,9 @@ export function snapshot() {
     sim: {
       tick: sim.tick, date: sim.sim_date, hour: sim.hour, day: sim.day, running: !!sim.running, interval_ms: sim.interval_ms, data_end: sim.data_end,
       auto_pause: cfg.b("sim.auto_pause_critical"), presets: cfg.j<number[]>("sim.interval_presets_ms"), min_interval_ms: cfg.n("sim.min_interval_ms"),
-      max_advance: cfg.n("sim.max_advance_hours"), rentable_type: cfg.s("space.rentable_request_type"), page_size: cfg.n("ui.feed_page_size"), utc_offset: cfg.n("sim.utc_offset_hours"),
+      max_advance: cfg.n("sim.max_advance_hours"), rentable_type: cfg.s("space.rentable_request_type"), start_date: sim.start_date, postpone_hours: cfg.n("rec.postpone_hours"), undo_seconds: cfg.n("ui.undo_seconds"), seq: g.__sssseq, decided: recs.filter((r) => r.status !== "PENDING").length, page_size: cfg.n("ui.feed_page_size"), utc_offset: cfg.n("sim.utc_offset_hours"),
     },
+    names: Object.fromEntries(items.map((i) => [i.item_id, { name_en: i.name_en, name_ar: i.name_ar, unit: i.unit }])),
     kpi, kpi_explain: kpiExplain, items, alerts, recs, plan, requests, leases, runs, events, recent_movements: recent, totals, health,
     budget: { total: bud.total, committed: bud.committed, new_funded: pendingPo, start: bud.start, end: bud.end, over: bud.overBudget,
       explain: ex("ex.budget", [{ label: "ex.in.budget_total", value: bud.total, unit: "OMR" }, { label: "ex.in.committed", value: bud.committed, unit: "OMR" }, { label: "ex.in.drafts", value: pendingPo, unit: "OMR" }], bud.free - pendingPo, "OMR") },

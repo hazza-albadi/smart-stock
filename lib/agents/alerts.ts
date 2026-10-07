@@ -3,6 +3,7 @@ import { addDays, diffDays } from "../time";
 import { getSim, logRun, logEvent, upsertRec, M, type AgentResult, type Item, type Msg, type Severity } from "../core";
 import { loadSettings } from "../settings";
 import { loadLive } from "../live";
+import { coverHours } from "../calc";
 import { holdingLeases, computeZones } from "./space";
 
 const SEV_ORDER: Severity[] = ["Critical", "High", "Monitor", "Info"];
@@ -15,6 +16,7 @@ interface A {
 const PAUSE_KINDS = ["EXPIRY", "DELAYED_PO"];
 const evSeverity = (a: { kind: string; severity: Severity }) => (a.kind === "DECISION_OVERDUE" ? "high" : EVENT_SEV[a.severity]);
 const evOpts = (a: { key: string; kind: string; severity: Severity }) => ({ ref: a.key, meta: { pause: a.severity === "Critical" && PAUSE_KINDS.includes(a.kind) } });
+const lastsH = (l: { onHand: number; weeklyUsage: number }) => coverHours(l.onHand, l.weeklyUsage);
 const hrs = (h: number) => Math.max(0, Math.round(h));
 
 /** Agent 4 (ACT): raises alerts (what / why / what happens if ignored) and drafts supplier messages for critical/high supplier issues. */
@@ -51,7 +53,7 @@ export function alertAgent(group: string, trigger: string): AgentResult {
       sev = rank === 0 ? (soon ? "Critical" : "High") : rank === 1 ? (soon ? "High" : "Monitor") : "Monitor";
     }
     if (sev) {
-      const detail: Msg[] = [M("alert.stockout.d1", { onhand: l.onHand, unit: it.unit, cover: l.cover, ss: it.safety_stock, lead: it.lead_time_days, crit: it.criticality })];
+      const detail: Msg[] = [M("alert.stockout.d1", { onhand: l.onHand, unit: it.unit, cover: l.cover, lasts: lastsH(l), ss: it.safety_stock, lead: it.lead_time_days, crit: it.criticality })];
       if (f.season_factor > 1.05) detail.push(M("alert.stockout.season", { factor: f.season_factor }));
       if (delayed.length) detail.push(M("alert.stockout.delayed", { po: delayed[0].po_id, date: delayed[0].expected_arrival, hour: delayed[0].expected_hour }));
       else if (l.pos.length) detail.push(M("alert.stockout.next_po", { date: l.pos[0].expected_arrival, hour: l.pos[0].expected_hour }));
@@ -67,7 +69,7 @@ export function alertAgent(group: string, trigger: string): AgentResult {
         msgs.push({ key: `MSG:STOCKOUT:${it.item_id}`, item: it, payload: {
           kind: "stockout", item_id: it.item_id, supplier_id: it.supplier_id, supplier_name: sup.get(it.supplier_id) ?? it.supplier_id,
           subject: M("sup.stockout.subject", { item: it.item_id }),
-          parts: [M("sup.stockout.body", { supplier: sup.get(it.supplier_id) ?? "", item: it.item_id, onhand: l.onHand, unit: it.unit, cover: l.cover, lead: it.lead_time_days })],
+          parts: [M("sup.stockout.body", { supplier: sup.get(it.supplier_id) ?? "", item: it.item_id, onhand: l.onHand, unit: it.unit, cover: l.cover, lasts: lastsH(l), lead: it.lead_time_days })],
         } });
       }
     }
@@ -79,7 +81,7 @@ export function alertAgent(group: string, trigger: string): AgentResult {
       const gap = Math.max(0, diffDays(p.expected_arrival, now.date));
       const sName = sup.get(p.supplier_id) ?? p.supplier_id;
       const altLive = alt?.onHand ?? 0;
-      const detail: Msg[] = [M("alert.delay.d1", { po: p.po_id, order_date: p.order_date, due: dueOrig, gap, cover: l.cover })];
+      const detail: Msg[] = [M("alert.delay.d1", { po: p.po_id, order_date: p.order_date, due: dueOrig, gap, cover: l.cover, lasts: lastsH(l) })];
       if (alt) detail.push(M("alert.delay.alt", { alt: alt.item.item_id, onhand: altLive, unit: alt.item.unit }));
       alerts.push({
         key: `DELAY:${p.po_id}`, kind: "DELAYED_PO", item_id: it.item_id, severity: psev,
@@ -89,7 +91,7 @@ export function alertAgent(group: string, trigger: string): AgentResult {
       });
       const parts: Msg[] = [M("sup.delay.body", {
         supplier: sName, po: p.po_id, qty: p.quantity, unit: it.unit, item: it.item_id, order_date: p.order_date, eta: p.expected_arrival,
-        onhand: l.onHand, cover: l.cover, hours: stockoutHours ?? 0,
+        onhand: l.onHand, cover: l.cover, lasts: lastsH(l), hours: stockoutHours ?? 0,
       })];
       if (alt) parts.push(M("sup.delay.alt", { alt: alt.item.item_id }));
       msgs.push({ key: `MSG:${p.po_id}`, item: it, payload: {
@@ -105,7 +107,7 @@ export function alertAgent(group: string, trigger: string): AgentResult {
         title: M("alert.anomaly.title", { ratio: f.anomaly_ratio, item: it.item_id }),
         detail: [M("alert.anomaly.d1", { last: f.last3_avg, prior: f.prior12_avg, weeks: cfg.n("forecast.recent_weeks"), pweeks: cfg.n("forecast.prior_weeks"), onhand: l.onHand, unit: it.unit }),
           ...(l.pos.length ? [M("alert.anomaly.onorder", { qty: l.pos.reduce((a, p) => a + p.quantity, 0), unit: it.unit })] : [])],
-        ignore: so ? M("alert.ignore.stockout", { hours: stockoutHours, date: so.date }) : M("alert.ignore.cover", { cover: l.cover }),
+        ignore: so ? M("alert.ignore.stockout", { hours: stockoutHours, date: so.date }) : M("alert.ignore.cover", { cover: l.cover, lasts: lastsH(l) }),
       });
     }
 
@@ -180,7 +182,7 @@ export function alertAgent(group: string, trigger: string): AgentResult {
   for (const r of d.prepare(`SELECT key, item_id, payload, created_tick FROM recommendations WHERE kind='PO' AND status='PENDING'`).all() as
     { key: string; item_id: string; payload: string; created_tick: number }[]) {
     const age = sim.tick - r.created_tick;
-    if (age < escalate) continue;
+    if (age < escalate || (JSON.parse(r.payload).snooze_until ?? 0) > sim.tick) continue;
     const l = live.get(r.item_id);
     const p = JSON.parse(r.payload);
     const so = l?.onHand && l.onHand > 0 ? l.stockout : null;

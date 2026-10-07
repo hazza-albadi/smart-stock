@@ -15,9 +15,9 @@ interface RecRow { id: number; key: string; kind: string; item_id: string | null
 
 const audit = (kind: string, o: { rec?: RecRow; item?: string | null; req?: string | null; decision: string; ref?: string | null; detail?: unknown; actor?: string }) => {
   const s = getSim();
-  db().prepare(`INSERT INTO decisions(tick,ts,rec_id,rec_key,kind,item_id,request_id,decision,actor,ref,detail) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+  return db().prepare(`INSERT INTO decisions(tick,ts,rec_id,rec_key,kind,item_id,request_id,decision,actor,ref,detail) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
     .run(s.tick, new Date().toISOString(), o.rec?.id ?? null, o.rec?.key ?? null, kind, o.item ?? o.rec?.item_id ?? null, o.req ?? o.rec?.request_id ?? null,
-      o.decision, o.actor ?? "user", o.ref ?? null, JSON.stringify(o.detail ?? {}));
+      o.decision, o.actor ?? "user", o.ref ?? null, JSON.stringify(o.detail ?? {})).lastInsertRowid as number;
 };
 
 function placePo(item: Item, qty: number, o: { emergency: boolean; recKey: string | null; source: string }): { poId: string; arrival: string; hour: number; cost: number; over: boolean } {
@@ -50,6 +50,7 @@ export function decide(id: number, decision: "APPROVED" | "REJECTED", opts: Deci
   const p = JSON.parse(rec.payload);
   const ok = decision === "APPROVED";
   const cfg = loadSettings();
+  let decisionId = 0;
 
   d.transaction(() => {
     let detail: Record<string, unknown> = {};
@@ -99,12 +100,60 @@ export function decide(id: number, decision: "APPROVED" | "REJECTED", opts: Deci
       d.prepare(`UPDATE recommendations SET status=?, decided_tick=?, payload=? WHERE id=?`).run(decision, s.tick, JSON.stringify({ ...p, approved_allocations: allocations }), id);
       ref = req.request_id;
     }
-    audit(rec.kind, { rec, decision, ref, detail });
+    decisionId = audit(rec.kind, { rec, decision, ref, detail });
   })();
 
   // agents react to the decision: plan / budget, alerts, space matching of the other requests
   runAll({ group: `${s.tick}#decision`, trigger: "decision" });
-  return d.prepare(`SELECT * FROM recommendations WHERE id=?`).get(id);
+  return { rec: d.prepare(`SELECT * FROM recommendations WHERE id=?`).get(id), decisionId };
+}
+
+/** Postpone: hide the recommendation for a while (it keeps ageing, no overdue alert meanwhile). */
+export function postpone(id: number) {
+  const d = db();
+  const rec = d.prepare(`SELECT * FROM recommendations WHERE id=?`).get(id) as RecRow | undefined;
+  if (!rec || rec.status !== "PENDING") throw new Error("only a pending recommendation can be postponed");
+  const s = getSim();
+  const hours = loadSettings().n("rec.postpone_hours");
+  const p = JSON.parse(rec.payload);
+  d.transaction(() => {
+    d.prepare(`UPDATE recommendations SET payload=? WHERE id=?`).run(JSON.stringify({ ...p, snooze_until: s.tick + hours }), id);
+    audit(rec.kind, { rec, decision: "POSTPONED", detail: { effect: "none", until: s.tick + hours } });
+    logEvent("POSTPONED", rec.item_id, M("ev.postponed", { what: rec.kind, item: rec.item_id ?? "", req: rec.request_id ?? "", hours }), "info", { ref: rec.key, actor: "user" });
+  })();
+}
+
+/** Undo an approval / rejection while its effects can still be reversed (PO not received yet, no later change of the same lease ...). */
+export function undo(decisionId: number) {
+  const d = db();
+  const dec = d.prepare(`SELECT * FROM decisions WHERE id=?`).get(decisionId) as { id: number; rec_id: number; kind: string; decision: string; detail: string; request_id: string | null } | undefined;
+  if (!dec || !dec.rec_id) throw new Error("this decision cannot be undone");
+  const rec = d.prepare(`SELECT * FROM recommendations WHERE id=?`).get(dec.rec_id) as RecRow | undefined;
+  if (!rec) throw new Error("this decision cannot be undone");
+  const det = JSON.parse(dec.detail ?? "{}");
+  const s = getSim();
+  d.transaction(() => {
+    const p = JSON.parse(rec.payload);
+    if (dec.kind === "PO" && dec.decision === "APPROVED") {
+      const po = d.prepare(`SELECT * FROM purchase_orders_open WHERE po_id=?`).get(det.po) as { status: string } | undefined;
+      if (!po || po.status !== "OPEN") throw new Error("the order has already arrived or changed");
+      d.prepare(`DELETE FROM purchase_orders_open WHERE po_id=?`).run(det.po);
+      const base = rec.key.replace(/#\d+$/, "");
+      d.prepare(`DELETE FROM recommendations WHERE key=? AND id<>?`).run(base, rec.id);
+      delete p.po_id;
+      d.prepare(`UPDATE recommendations SET status='PENDING', key=?, decided_tick=NULL, payload=? WHERE id=?`).run(base, JSON.stringify({ ...p, cost: p.qty * p.unit_cost * (1 + (p.emergency ? loadSettings().n("po.emergency_premium") : 0)) }), rec.id);
+    } else if (dec.kind === "SPACE" && dec.decision === "APPROVED") {
+      d.prepare(`DELETE FROM leases WHERE request_id=?`).run(rec.request_id);
+      delete p.approved_allocations;
+      d.prepare(`UPDATE recommendations SET status='PENDING', decided_tick=NULL, payload=? WHERE id=?`).run(JSON.stringify(p), rec.id);
+    } else if (dec.decision === "REJECTED" || dec.kind === "SUPPLIER_MSG") {
+      delete p.decision_ctx;
+      d.prepare(`UPDATE recommendations SET status='PENDING', decided_tick=NULL, payload=? WHERE id=?`).run(JSON.stringify(p), rec.id);
+    } else throw new Error("this decision cannot be undone");
+    d.prepare(`DELETE FROM decisions WHERE id=?`).run(dec.id);
+    logEvent("UNDO", rec.item_id, M("ev.undo", { what: rec.kind, item: rec.item_id ?? "", req: rec.request_id ?? "" }), "info", { ref: rec.key, actor: "user" });
+  })();
+  runAll({ group: `${s.tick}#undo`, trigger: "decision" });
 }
 
 /** Edit the quantity of a pending PO draft before approving it. */

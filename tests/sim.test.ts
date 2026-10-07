@@ -7,7 +7,7 @@ import { useDatabase, db, closeDb } from "../lib/db";
 import { seedDatabase } from "../lib/seed";
 import { runAll } from "../lib/agents/coordinator";
 import { tick, advance, setRunning } from "../lib/sim";
-import { decide, editQty, manualMovement, createManualPo, createSpaceRequest } from "../lib/decisions";
+import { decide, editQty, manualMovement, createManualPo, createSpaceRequest, postpone, undo } from "../lib/decisions";
 import { readDay0State } from "../lib/baselineState";
 import { snapshot } from "../lib/snapshot";
 import { impactLog } from "../lib/impact";
@@ -185,4 +185,38 @@ test("auto-pause: real stock-out pauses once; overdue-decision alerts and projec
   assert.ok((r2.critical as any[]).every((e) => e.type === "STOCKOUT" || e.ref?.startsWith("EXPIRY") || e.ref?.startsWith("DELAY")));
   const ev = q(`SELECT COUNT(*) n FROM events WHERE type='STOCKOUT' AND item_id=?`, (r2.critical as any[])[0].item_id)[0].n;
   assert.equal(ev, 1, "once per event");
+});
+
+test("undo reverses an approval (order removed, budget restored, draft back) and a rejection; it is refused once the order has arrived", () => {
+  fresh();
+  const rec = q(`SELECT id, key, item_id FROM recommendations WHERE kind='PO' AND status='PENDING' ORDER BY id`)[0];
+  const budget0 = snapshot().kpi.budget_remaining;
+  const r = decide(rec.id, "APPROVED");
+  assert.ok(snapshot().kpi.budget_remaining < budget0);
+  undo(r.decisionId);
+  assert.equal(snapshot().kpi.budget_remaining, budget0);
+  assert.equal(q(`SELECT status, key FROM recommendations WHERE id=?`, rec.id)[0].status, "PENDING");
+  assert.equal(q(`SELECT key FROM recommendations WHERE id=?`, rec.id)[0].key, rec.key);
+  assert.equal(q(`SELECT COUNT(*) n FROM purchase_orders_open WHERE source='AGENT'`)[0].n, 0);
+  const rj = decide(rec.id, "REJECTED");
+  undo(rj.decisionId);
+  assert.equal(q(`SELECT status FROM recommendations WHERE id=?`, rec.id)[0].status, "PENDING");
+  assert.deepEqual(runInvariants(true).filter((c) => !c.ok), []);
+  const again = decide(rec.id, "APPROVED");
+  advance({ hours: 24 * 8 });
+  assert.throws(() => undo(again.decisionId), /already arrived|changed/);
+});
+
+test("postpone hides a suggestion for a while: it stays pending, is flagged snoozed and raises no overdue alert", () => {
+  fresh();
+  setSetting("rec.postpone_hours", 48);
+  const rec = q(`SELECT id, key FROM recommendations WHERE kind='PO' AND status='PENDING' ORDER BY id`)[0];
+  postpone(rec.id);
+  advance({ hours: 30 });
+  const s = snapshot();
+  const r = s.recs.find((x) => x.id === rec.id)!;
+  assert.equal(r.status, "PENDING"); assert.ok(r.snoozed); assert.ok(!r.overdue);
+  assert.ok(!s.alerts.some((a) => a.key === `OVERDUE:${rec.key}`));
+  advance({ hours: 24 });
+  assert.ok(!snapshot().recs.find((x) => x.id === rec.id)!.snoozed, "comes back after the postponement");
 });

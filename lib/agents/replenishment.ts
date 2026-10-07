@@ -132,9 +132,9 @@ export function replenishmentAgent(group: string, trigger: string): AgentResult 
     }
     const parts: Msg[] = [M("repl.r.below", { position: c.position, rop: c.rop, unit: it.unit, lead: it.lead_time_days })];
     if (l.fc!.season_factor > 1.05) parts.push(M("repl.r.season", { factor: l.fc!.season_factor }));
-    if (staged) parts.unshift(staged);
     parts.push(l.stockout ? M("repl.r.stockout", { hours: l.stockout.hours }) : M("repl.r.cover", { cover: l.cover }));
 
+    if (staged) parts.push(staged);
     let status: "FUNDED" | "PARTIAL" | "DEFERRED";
     let qty = c.qty;
     if (c.cost <= remaining + 1e-9) status = "FUNDED";

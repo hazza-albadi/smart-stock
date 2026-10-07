@@ -27,7 +27,7 @@ test("dynamic key families are complete", () => {
   const need = ["st.Critical", "st.Low", "st.OK", "st.Overstock", "st.Expiring", "sev.Critical", "sev.High", "sev.Monitor", "sev.Info",
     "plan.FUNDED", "plan.PARTIAL", "plan.DEFERRED", "plan.OVERSTOCK", "plan.REJECTED", "kind.PO", "kind.SUPPLIER_MSG", "kind.SPACE",
     "dec.APPROVE", "dec.REJECT", "dec.PARTIAL", "lease.ACTIVE", "lease.RESERVED", "lease.ENDED", "mk.receipt", "mk.issue", "mk.adjust",
-    "agent.forecast", "agent.replenishment", "agent.space", "agent.alerts", "agent.matching", "kindRead", "kindReason", "kindAct",
+    "agent.forecast", "agent.replenishment", "agent.space", "agent.alerts", "agent.matching",
     "nav.pending", "nav.alerts", "nav.space", "nav.plan", "nav.impact", "nav.agents", "nav.manual", "nav.settings", "po.OPEN", "po.DELAYED_BY_SUPPLIER",
     "alert.prop.STOCKOUT", "alert.prop.DELAYED_PO", "alert.prop.ANOMALY", "alert.prop.EXPIRY", "alert.prop.SAFETY_LOW", "alert.prop.OVERSTOCK", "alert.prop.LEASE_RISK", "alert.prop.DECISION_OVERDUE", "alert.prop.SPACE_OVER",
     "evt.user", "evt.system", "fmt.m2", "fmt.omr", "fmt.from", "fmt.emerg", "fmt.short", "fmt.none", "fmt.ongoing"];

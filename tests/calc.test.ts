@@ -9,6 +9,9 @@ import { clockAt, tickOf } from "../lib/clock";
 import { num, omrNum, clock } from "../lib/format";
 import { render } from "../lib/render";
 import { rand } from "../lib/rng";
+import { coverHours } from "../lib/calc";
+import { duration } from "../lib/render";
+import { share } from "../lib/store";
 
 const season = { items: ["X"], peak: 2, ramp_start: "10-05", ramp_days: 10, season_end: "03-31", decay_days: 10 };
 const profile = [0.2, 0.2, 0.2, 0.2, 0.2, 0.4, 1, 3, 6, 8, 9, 9, 6, 7, 9, 9, 8, 6, 3, 2, 1, 0.5, 0.3, 0.2];
@@ -140,6 +143,32 @@ test("messages render in both languages with localized numerals", () => {
   const m = { k: "ev.stockout", v: { item: "X" } };
   assert.match(render("en", m, { items: { X: { name_en: "Frozen shells", name_ar: "قشور" } } }), /Frozen shells/);
   assert.match(render("ar", m, { items: { X: { name_en: "Frozen shells", name_ar: "قشور" } } }), /قشور/);
-  assert.match(render("ar", { k: "alert.stockout.title", v: { hours: 49, item: "X" } }), /٤٩/);
-  assert.match(render("en", { k: "alert.stockout.title", v: { hours: 49, item: "X" } }), /49 h/);
+  assert.match(render("ar", { k: "alert.stockout.title", v: { hours: 5, item: "X" } }), /٥ ساعات/);
+  assert.match(render("en", { k: "alert.stockout.title", v: { hours: 5, item: "X" } }), /about 5 hours/);
+  assert.match(render("en", { k: "alert.stockout.title", v: { hours: 49, item: "X" } }), /about 2 days/);
+  assert.match(render("ar", { k: "alert.stockout.title", v: { hours: 49, item: "X" } }), /يومين/);
+});
+
+test("duration speaks plain words in both languages", () => {
+  assert.equal(duration("en", 0.4), "less than an hour");
+  assert.equal(duration("en", 1), "1 hour");
+  assert.equal(duration("en", 7), "7 hours");
+  assert.equal(duration("en", 72), "3 days");
+  assert.equal(duration("en", 24 * 20), "3 weeks");
+  assert.equal(duration("ar", 7), "٧ ساعات");
+  assert.equal(duration("ar", 11), "١١ ساعة");
+  assert.equal(duration("en", null), "an unknown time");
+  assert.equal(coverHours(170, 578.5)?.toFixed(1), "49.4");
+  assert.equal(coverHours(10, 0), null);
+});
+
+test("structural sharing keeps the identity of unchanged parts (so only changed panels re-render)", () => {
+  const a: any = { sim: { tick: 1 }, items: [{ id: 1, q: 5 }, { id: 2, q: 7 }], recs: [{ id: 9 }] };
+  const b: any = { sim: { tick: 2 }, items: [{ id: 1, q: 5 }, { id: 2, q: 8 }], recs: [{ id: 9 }] };
+  const c = share(a, b);
+  assert.equal(c.recs, a.recs);
+  assert.equal(c.items[0], a.items[0]);
+  assert.notEqual(c.items[1], a.items[1]);
+  assert.equal(c.sim.tick, 2);
+  assert.equal(share(a, JSON.parse(JSON.stringify(a))), a);
 });

@@ -56,7 +56,12 @@ export function upsertRec(key: string, kind: string, itemId: string | null, requ
       .run(key, kind, itemId, requestId, json, getSim().tick, source);
     return "PENDING";
   }
-  if (row.status === "PENDING") d.prepare(`UPDATE recommendations SET payload=? WHERE key=?`).run(json, key);
+  if (row.status === "PENDING") {
+    // a postponement chosen by the user survives the hourly refresh
+    const old = JSON.parse((d.prepare(`SELECT payload FROM recommendations WHERE key=?`).get(key) as { payload: string }).payload);
+    const merged = old.snooze_until ? { ...(payload as object), snooze_until: old.snooze_until } : payload;
+    d.prepare(`UPDATE recommendations SET payload=? WHERE key=?`).run(JSON.stringify(merged), key);
+  }
   return row.status;
 }
 
