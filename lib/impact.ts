@@ -2,10 +2,11 @@ import { db } from "./db";
 import { clockAt } from "./clock";
 import { getSim, M, type Msg } from "./core";
 import { budgetInfo } from "./agents/replenishment";
+import { spaceImpact } from "./space/impact";
 
 export interface ImpactRow {
   id: number; tick: number; kind: string; decision: string; item_id: string | null; request_id: string | null;
-  head: Msg; effects: Msg[]; state: "effect" | "pending" | "none";
+  head: Msg; effects: Msg[]; state: "effect" | "pending" | "none"; flow: "purchasing" | "space";
 }
 
 const all = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).all(...a) as T[];
@@ -15,7 +16,7 @@ const one = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).get(...
  * Decision impact log: for every stored decision, the consequences are read from the event chain, movements and demand log
  * (never written by hand). Example: "You rejected PO-X at ... -> item stocked out at ... -> production stopped for N hours".
  */
-export function impactLog(limit = 60): ImpactRow[] {
+function purchasingImpact(limit = 60): ImpactRow[] {
   const sim = getSim();
   const when = (tick: number) => { const c = clockAt(sim.start_date, tick); return `${c.date}|${c.hour}`; };
   const rows = all(`SELECT * FROM decisions ORDER BY tick DESC, id DESC LIMIT ?`, limit);
@@ -50,6 +51,7 @@ export function impactLog(limit = 60): ImpactRow[] {
         if (so !== undefined) effects.push(M("impact.e.stockout_waiting", { item: r.item_id, when: when(so), hours: unmetHours(r.item_id, r.tick, sim.tick + 1) }));
       }
       if (d.over_budget) effects.push(M("impact.e.over_budget", { free: budgetInfo().free }));
+      for (const e of all(`SELECT tick FROM events WHERE type IN ('SPACE_CONFLICT','OFFER_BLOCKED') AND json_extract(meta,'$.po')=? ORDER BY tick LIMIT 3`, d.po)) effects.push(M("impact.e.po_space_conflict", { when: when(e.tick) }));
     } else if (r.kind === "PO" && r.decision === "REJECTED") {
       head = M("impact.head.po_rejected", { item: r.item_id, qty: d.qty, when: w });
       const so = firstStockout(r.item_id, r.tick, sim.tick + 1);
@@ -72,21 +74,6 @@ export function impactLog(limit = 60): ImpactRow[] {
       head = M("impact.head.msg", { item: r.item_id, decision: r.decision, when: w });
       state = "none";
       effects.push(M("impact.none.msg"));
-    } else if (r.kind === "SPACE" && r.decision === "APPROVED" && d.allocations) {
-      const list = (d.allocations as { zone_id: string; area: number }[]).map((a) => `${Math.round(a.area)}|${a.zone_id}`).join(",");
-      head = M("impact.head.space_approved", { req: r.request_id, list, when: w });
-      effects.push(M("impact.e.lease_reserved", { list, start: d.start, end: d.end }));
-      const st = one(`SELECT tick FROM events WHERE type='LEASE_START' AND ref=? LIMIT 1`, r.request_id);
-      if (st) effects.push(M("impact.e.lease_started", { when: when(st.tick) }));
-      for (const e of all(`SELECT tick, msg FROM events WHERE type='ALERT' AND ref LIKE 'LEASE_RISK:%' AND tick>=? ORDER BY tick LIMIT 2`, r.tick)) effects.push(M("impact.e.lease_risk", { when: when(e.tick) }));
-      const en = one(`SELECT tick FROM events WHERE type='LEASE_END' AND ref=? LIMIT 1`, r.request_id);
-      if (en) effects.push(M("impact.e.lease_ended", { when: when(en.tick) }));
-      const others = all(`SELECT COUNT(*) c FROM recommendations WHERE kind='SPACE' AND status='PENDING'`)[0]?.c ?? 0;
-      effects.push(M("impact.e.others_recomputed", { n: others }));
-    } else if (r.kind === "SPACE") {
-      head = M(r.decision === "REJECTED" ? "impact.head.space_rejected" : "impact.head.space_declined", { req: r.request_id, when: w });
-      effects.push(M(r.decision === "REJECTED" ? "impact.e.space_open" : "impact.e.space_none"));
-      if (r.decision !== "REJECTED") state = "none";
     } else if (r.kind === "MANUAL_MOVEMENT") {
       const mv = one(`SELECT balance_after, quantity, movement_type FROM stock_movements WHERE item_id=? AND tick=? AND actor='user' ORDER BY seq DESC LIMIT 1`, r.item_id, r.tick);
       head = M("impact.head.manual", { item: r.item_id, kind: String(r.decision).toLowerCase(), qty: d.moved ?? d.qty, when: w });
@@ -100,6 +87,12 @@ export function impactLog(limit = 60): ImpactRow[] {
       state = "none";
     }
     void nameOf;
-    return { id: r.id, tick: r.tick, kind: r.kind, decision: r.decision, item_id: r.item_id, request_id: r.request_id, head, effects, state };
+    return { id: r.id, tick: r.tick, kind: r.kind, decision: r.decision, item_id: r.item_id, request_id: r.request_id, head, effects, state, flow: "purchasing" };
   });
+}
+
+/** Both flows in one list, newest first; every entry carries its flow. */
+export function impactLog(limit = 60): ImpactRow[] {
+  const sp = spaceImpact(limit) as unknown as ImpactRow[];
+  return [...purchasingImpact(limit), ...sp].sort((a, b) => b.tick - a.tick || (a.flow === b.flow ? b.id - a.id : a.flow === "space" ? -1 : 1)).slice(0, limit);
 }

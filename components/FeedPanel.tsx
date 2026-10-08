@@ -1,5 +1,5 @@
 "use client";
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useSnap } from "@/lib/store";
 import { useApp } from "./ctx";
 import { CardHead, Empty, Pill } from "./ui";
@@ -30,12 +30,13 @@ const MoveRow = memo(function MoveRow({ m, index }: { m: FeedMove; index: number
   );
 });
 
-export default function FeedPanel({ feed, onMore, moreLeft }: { feed: FeedMove[]; onMore: () => void; moreLeft: boolean }) {
+export default function FeedPanel({ feed, onMore, moreLeft, flow }: { feed: FeedMove[]; onMore: () => void; moreLeft: boolean; flow: "purchasing" | "space" }) {
   const { T, R, DT } = useApp();
-  const events = useSnap((s) => s.events);
+  const allEvents = useSnap((s) => s.events);
+  const events = useMemo(() => allEvents.filter((e) => e.flow === flow || e.flow === "both").slice(0, 80), [allEvents, flow]);
   const running = useSnap((s) => s.sim.running);
   const pageSize = useSnap((s) => s.sim.page_size);
-  const [tab, setTab] = useState<"moves" | "events">("moves");
+  const [tab, setTab] = useState<"moves" | "events">(flow === "space" ? "events" : "moves");
   const [vis, setVis] = useState(60); // only the newest rows are in the DOM: fewer updates per hour
   const rows = feed.slice(0, vis);
   const [older, setOlder] = useState<typeof events>([]);
@@ -43,15 +44,15 @@ export default function FeedPanel({ feed, onMore, moreLeft }: { feed: FeedMove[]
   const all = [...events, ...older.filter((o) => !events.some((e) => e.id === o.id))];
   const loadOlder = async () => {
     const last = all[all.length - 1];
-    const more = await fetch(`/api/events?before=${last?.id ?? 0}&limit=${pageSize}`).then((r) => r.json());
+    const more = await fetch(`/api/events?before=${last?.id ?? 0}&limit=${pageSize}&flow=${flow}`).then((r) => r.json());
     setOlder((o) => [...o, ...more]);
     if (more.length < pageSize) setEvDone(true);
   };
   return (
     <section className="card flex h-[520px] flex-col overflow-hidden" aria-label={T("feed.title")}>
       <CardHead
-        title={<span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${running ? "live-dot bg-ok" : "bg-muted"}`} aria-hidden />{T("feed.title")}</span>}
-        sub={T("feed.sub")}
+        title={<span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${running ? "live-dot bg-ok" : "bg-muted"}`} aria-hidden />{T(flow === "space" ? "feed.title_space" : "feed.title")}</span>}
+        sub={T(flow === "space" ? "feed.sub_space" : "feed.sub")}
         right={
           <div className="flex overflow-hidden rounded-lg border border-line text-sm font-semibold" role="tablist" aria-label={T("feed.title")}>
             {(["moves", "events"] as const).map((k) => (

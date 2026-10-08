@@ -24,7 +24,8 @@ export function useDatabase(file: string) { dbFile = file; }
 
 const TABLES = ["items", "suppliers", "stock_movements", "current_stock", "stock_opening", "purchase_orders_open", "purchasing_budget",
   "warehouse_zones", "space_requests", "agent_runs", "events", "recommendations", "decisions", "sim_state", "sim_baseline", "forecasts",
-  "replenishment_plan", "zone_space", "alerts", "settings", "leases", "demand_log", "audit_results"];
+  "replenishment_plan", "zone_space", "alerts", "settings", "leases", "demand_log", "audit_results",
+  "space_forecasts", "space_listings", "space_offers", "space_leases", "space_decisions"];
 
 export const SCHEMA = TABLES.map((t) => `DROP TABLE IF EXISTS ${t};`).join(" ") + `
 CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, unit TEXT, description TEXT);
@@ -51,7 +52,7 @@ CREATE TABLE space_requests(request_id TEXT PRIMARY KEY, company TEXT, required_
 CREATE TABLE agent_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, run_group TEXT, agent TEXT, tick INTEGER, sim_date TEXT,
   started_at TEXT, finished_at TEXT, summary TEXT, trigger TEXT);
 CREATE TABLE events(id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER, ts TEXT, sim_date TEXT, type TEXT, item_id TEXT,
-  severity TEXT, msg TEXT, ref TEXT, actor TEXT DEFAULT 'system', meta TEXT);
+  severity TEXT, msg TEXT, ref TEXT, actor TEXT DEFAULT 'system', meta TEXT, flow TEXT DEFAULT 'purchasing');
 CREATE INDEX idx_ev_item ON events(item_id, tick);
 CREATE TABLE recommendations(id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, kind TEXT, item_id TEXT, request_id TEXT,
   payload TEXT, status TEXT DEFAULT 'PENDING', created_tick INTEGER, decided_tick INTEGER, source TEXT DEFAULT 'agent', reopen_count INTEGER DEFAULT 0);
@@ -68,9 +69,19 @@ CREATE TABLE replenishment_plan(id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TE
 CREATE TABLE zone_space(zone_id TEXT PRIMARY KEY, capacity REAL, fixed REAL, stock_used REAL, used REAL, reserved REAL,
   rent_allowed INTEGER, free REAL, rentable REAL, allocated REAL, over_capacity REAL, updated_tick INTEGER);
 CREATE TABLE alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, kind TEXT, item_id TEXT, severity TEXT,
-  title TEXT, detail TEXT, ignore_msg TEXT, rec_key TEXT, active INTEGER DEFAULT 1, first_tick INTEGER, updated_tick INTEGER);
-CREATE TABLE leases(id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT, company TEXT, zone_id TEXT, area REAL, start_date TEXT,
-  end_date TEXT, status TEXT, decided_tick INTEGER, ended_tick INTEGER);
+  title TEXT, detail TEXT, ignore_msg TEXT, rec_key TEXT, active INTEGER DEFAULT 1, first_tick INTEGER, updated_tick INTEGER, flow TEXT DEFAULT 'purchasing');
+-- Space flow (rental). Purchasing code never touches these tables; zone occupancy is read through lib/zones.ts only.
+CREATE TABLE space_forecasts(id INTEGER PRIMARY KEY AUTOINCREMENT, zone_id TEXT, start_date TEXT, end_date TEXT, area REAL, confidence TEXT,
+  inputs TEXT, state TEXT, held_until TEXT, to_horizon INTEGER DEFAULT 0, pending_area REAL DEFAULT 0, pending_note TEXT, updated_tick INTEGER, first_tick INTEGER);
+CREATE TABLE space_listings(id INTEGER PRIMARY KEY AUTOINCREMENT, zone_id TEXT, area REAL, start_date TEXT, end_date TEXT, price REAL,
+  status TEXT, created_tick INTEGER, published_tick INTEGER, resumed_tick INTEGER, closed_tick INTEGER, note TEXT);
+CREATE TABLE space_offers(id INTEGER PRIMARY KEY AUTOINCREMENT, listing_id INTEGER, request_id TEXT, company TEXT, area REAL, start_date TEXT,
+  end_date TEXT, price REAL, status TEXT, arrived_tick INTEGER, valid_until_tick INTEGER, decided_tick INTEGER, reason TEXT, counter TEXT,
+  counter_due_tick INTEGER, counter_n INTEGER DEFAULT 0, flag TEXT);
+CREATE TABLE space_leases(id INTEGER PRIMARY KEY AUTOINCREMENT, offer_id INTEGER, listing_id INTEGER, request_id TEXT, company TEXT, zone_id TEXT,
+  area REAL, start_date TEXT, end_date TEXT, price REAL, status TEXT, signed_tick INTEGER, ended_tick INTEGER, income REAL DEFAULT 0, income_days INTEGER DEFAULT 0);
+CREATE TABLE space_decisions(id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER, ts TEXT, kind TEXT, action TEXT, zone_id TEXT, listing_id INTEGER,
+  offer_id INTEGER, lease_id INTEGER, reeval_date TEXT, reason TEXT, detail TEXT);
 CREATE TABLE demand_log(day INTEGER, item_id TEXT, hour INTEGER, planned REAL, issued REAL DEFAULT 0, PRIMARY KEY(day, item_id, hour));
-CREATE TABLE audit_results(id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER, ts TEXT, kind TEXT, passed INTEGER, total INTEGER, failures TEXT);
+CREATE TABLE audit_results(id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER, ts TEXT, kind TEXT, passed INTEGER, total INTEGER, failures TEXT, by_flow TEXT);
 `;

@@ -3,9 +3,9 @@ import { useState } from "react";
 import { useApp } from "./ctx";
 import { Btn, Modal, Tabs } from "./ui";
 
-export const GLOSSARY = ["lasts", "order_point", "lead", "safety", "overstock", "expiring", "lot", "lease", "rentable", "buffer", "season", "spike", "critical_level", "forecast"];
-const TOUR = [1, 2, 3, 4, 5];
-const DEMO = [1, 2, 3, 4, 5, 6, 7, 8];
+export const GLOSSARY = ["lasts", "order_point", "lead", "safety", "overstock", "expiring", "lot", "lease", "rentable", "buffer", "season", "spike", "critical_level", "forecast", "window", "listing", "offer", "counter", "margin"];
+const TOUR = [1, 2, 3, 4, 5, 6];
+const DEMO = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 /** First-run tour: 5 short steps, skippable, remembered. */
 export function GuideTour({ onDone }: { onDone: () => void }) {

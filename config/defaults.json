@@ -439,5 +439,210 @@
     "value": 60,
     "unit": "rows",
     "description": "Rows per page in the live feed and logs ('load more')."
+  },
+  {
+    "key": "space.forecast_days",
+    "value": 90,
+    "unit": "days",
+    "description": "How many days ahead the Space Forecast looks (at least 90)."
+  },
+  {
+    "key": "space.safety_margin_pct",
+    "value": 10,
+    "unit": "pct",
+    "description": "Safety margin: this share of the space the company does not need stays off the market."
+  },
+  {
+    "key": "space.conflict_tolerance_pct",
+    "value": 15,
+    "unit": "pct",
+    "description": "A listing is flagged as squeezed by our own orders only when it is short by more than this share of its area (forecast noise is not a conflict)."
+  },
+  {
+    "key": "space.min_block_m2",
+    "value": 100,
+    "unit": "m2",
+    "description": "Smallest block of space worth listing."
+  },
+  {
+    "key": "space.min_lease_days",
+    "value": 14,
+    "unit": "days",
+    "description": "Shortest period worth listing or renting."
+  },
+  {
+    "key": "space.area_step_m2",
+    "value": 10,
+    "unit": "m2",
+    "description": "Listed areas are rounded down to this step."
+  },
+  {
+    "key": "space.max_layers",
+    "value": 2,
+    "unit": "int",
+    "description": "How many stacked windows (different areas) are searched per zone."
+  },
+  {
+    "key": "space.start_buffer_days",
+    "value": 3,
+    "unit": "days",
+    "description": "Space that only becomes free in the future is offered a few days later than the forecast says (forecast error)."
+  },
+  {
+    "key": "space.confidence_high_days",
+    "value": 30,
+    "unit": "days",
+    "description": "Forecast confidence is High when the window ends within this many days."
+  },
+  {
+    "key": "space.confidence_medium_days",
+    "value": 60,
+    "unit": "days",
+    "description": "Forecast confidence is Medium up to this many days; later is Low."
+  },
+  {
+    "key": "space.reeval_days",
+    "value": 14,
+    "unit": "days",
+    "description": "Default time before a space kept vacant is looked at again."
+  },
+  {
+    "key": "space.reopen_growth_pct",
+    "value": 25,
+    "unit": "pct",
+    "description": "A vacant space is offered for decision again early when the free area grows by this much."
+  },
+  {
+    "key": "space.price_suggested",
+    "value": 4,
+    "unit": "OMR",
+    "description": "Suggested rent in OMR per m² per month (synthetic assumption: the data has no prices)."
+  },
+  {
+    "key": "space.default_listing_months",
+    "value": 6,
+    "unit": "int",
+    "description": "Suggested length of a listing in months when the free window has no known end."
+  },
+  {
+    "key": "space.price_market",
+    "value": 4,
+    "unit": "OMR",
+    "description": "Market rent in OMR per m² per month used to simulate demand (synthetic assumption)."
+  },
+  {
+    "key": "space.price_band_pct",
+    "value": 20,
+    "unit": "pct",
+    "description": "Rent up to this much above the market price does not reduce offers."
+  },
+  {
+    "key": "space.price_sensitivity",
+    "value": 2,
+    "unit": "x",
+    "description": "How fast offers disappear when the rent is above the band, and how fast they come when it is below the market."
+  },
+  {
+    "key": "space.offer_base_prob",
+    "value": 0.85,
+    "unit": "ratio",
+    "description": "Chance that a matching company sends an offer at a market price."
+  },
+  {
+    "key": "space.offer_delay_min_h",
+    "value": 24,
+    "unit": "h",
+    "description": "Earliest an offer arrives after a listing is published."
+  },
+  {
+    "key": "space.offer_delay_max_h",
+    "value": 96,
+    "unit": "h",
+    "description": "Latest an offer arrives after a listing is published."
+  },
+  {
+    "key": "space.offer_fit_prob",
+    "value": 0.5,
+    "unit": "ratio",
+    "description": "Chance that a company adapts its area and dates to the listing."
+  },
+  {
+    "key": "space.offer_bid_spread_pct",
+    "value": 10,
+    "unit": "pct",
+    "description": "Companies bid within this much around the market price (never above the listing price)."
+  },
+  {
+    "key": "space.offer_validity_h",
+    "value": 120,
+    "unit": "h",
+    "description": "An offer that is not answered expires after this many hours."
+  },
+  {
+    "key": "space.counter_delay_min_h",
+    "value": 12,
+    "unit": "h",
+    "description": "Fastest answer of a company to a counter-offer."
+  },
+  {
+    "key": "space.counter_delay_max_h",
+    "value": 48,
+    "unit": "h",
+    "description": "Slowest answer of a company to a counter-offer."
+  },
+  {
+    "key": "space.counter_accept_prob",
+    "value": 0.7,
+    "unit": "ratio",
+    "description": "Chance that a company accepts a fair counter-offer."
+  },
+  {
+    "key": "space.days_per_month",
+    "value": 30,
+    "unit": "days",
+    "description": "Days in a rental month for income per day."
+  },
+  {
+    "key": "schedule.space_plan_hours",
+    "value": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23
+    ],
+    "unit": "hours",
+    "description": "Hours of the day when the Space Forecast agent runs (every hour by default; it also runs after every decision)."
+  },
+  {
+    "key": "space.rule_lease_beats_purchase",
+    "value": true,
+    "unit": "bool",
+    "description": "Priority 1: a signed rental comes before a new purchase (leased area is unavailable to purchasing). Off: purchasing ignores rentals."
+  },
+  {
+    "key": "space.rule_pending_blocks_listing",
+    "value": false,
+    "unit": "bool",
+    "description": "Priority 3: purchase suggestions nobody approved yet only warn (off). On: they also block listing the space they would need."
   }
 ]

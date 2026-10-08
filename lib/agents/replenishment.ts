@@ -4,8 +4,8 @@ import { budgetFigures, reorderPoint, demandOver, poWithin, roundUpTo } from "..
 import { getSim, logRun, logEvent, upsertRec, reopenRec, recPayload, M, type AgentResult, type Item, type Msg } from "../core";
 import { loadSettings } from "../settings";
 import { loadLive, type Live } from "../live";
-import { zoneRoom } from "../stock";
-import { holdingLeases } from "./space";
+import { zoneRoomBase } from "../stock";
+import { leasedOn } from "../zones";
 
 export function budgetInfo() {
   const b = db().prepare(`SELECT * FROM purchasing_budget LIMIT 1`).get() as {
@@ -19,6 +19,37 @@ export function budgetInfo() {
 
 /** Context stored with a recommendation, used later to tell whether a rejected draft got materially worse. */
 export const recContext = (l: Live) => ({ cover: l.cover, stockout_hours: l.stockout?.hours ?? null });
+
+/**
+ * Room model shared by the replenishment agent and the approval check: physical room per zone on the day an order would arrive.
+ * Signed leases are the only rental data it reads (through lib/zones.ts): leased area is unavailable from the lease start to its end.
+ */
+export function roomModel(cfg: ReturnType<typeof loadSettings>, live: Map<string, Live>, now: { date: string; hour: number }) {
+  const d = db();
+  const byZone = new Map<string, Live[]>();
+  for (const l of live.values()) byZone.set(l.item.zone_id, [...(byZone.get(l.item.zone_id) ?? []), l]);
+  const rentZones = new Set((d.prepare(`SELECT zone_id FROM warehouse_zones WHERE rent_allowed='yes'`).all() as { zone_id: string }[]).map((z) => z.zone_id));
+  const overflow = cfg.s("space.overflow_zone");
+  const promised = new Map<string, number>(); // m2 already promised to drafts of this run (higher priority first)
+  const roomAt = (zone: string, days: number, withLeases = true) => {
+    const arrival = addDays(now.date, days);
+    let r = zoneRoomBase(zone);
+    for (const x of byZone.get(zone) ?? []) {
+      const sp = x.item.space_m2_per_unit;
+      r += Math.min(x.onHand, demandOver(x.model, now, days * 24)) * sp; // stock used up before arrival frees room
+      r -= poWithin(x.pos, now.date, days) * sp; // incoming POs take room
+    }
+    if (withLeases && cfg.b("space.rule_lease_beats_purchase")) r -= leasedOn(zone, arrival); // priority 1 (setting): a signed rental beats a new purchase
+    return Math.max(0, r - (promised.get(zone) ?? 0));
+  };
+  const pools = (it: Item) => [it.zone_id, ...(rentZones.has(it.zone_id) && it.zone_id !== overflow ? [overflow] : [])];
+  const roomUnits = (it: Item, withLeases = true) => Math.floor(pools(it).reduce((a, z) => a + roomAt(z, it.lead_time_days, withLeases), 0) / it.space_m2_per_unit + 1e-9);
+  const promise = (it: Item, area: number) => {
+    let left = area;
+    for (const z of pools(it)) { const t = Math.min(left, roomAt(z, it.lead_time_days)); promised.set(z, (promised.get(z) ?? 0) + t); left -= t; }
+  };
+  return { roomAt, pools, roomUnits, promise };
+}
 
 /** Agent 2 (REASON): reorder point, order quantity and budget-constrained prioritisation. Proposes PO drafts. */
 export function replenishmentAgent(group: string, trigger: string): AgentResult {
@@ -39,29 +70,8 @@ export function replenishmentAgent(group: string, trigger: string): AgentResult 
   const topCrit = ([...new Set([...live.values()].map((l) => l.item.criticality))].sort()[0]) ?? "";
 
   // ---- physical room: what the item's zone (plus the overflow zone for general goods) can still take when a new order arrives ----
-  const byZone = new Map<string, Live[]>();
-  for (const l of live.values()) byZone.set(l.item.zone_id, [...(byZone.get(l.item.zone_id) ?? []), l]);
-  const rentZones = new Set((d.prepare(`SELECT zone_id FROM warehouse_zones WHERE rent_allowed='yes'`).all() as { zone_id: string }[]).map((z) => z.zone_id));
-  const overflow = cfg.s("space.overflow_zone");
-  const leases = holdingLeases();
-  const promised = new Map<string, number>(); // m2 already promised to drafts of this run (higher priority first)
-  const roomAt = (zone: string, days: number) => {
-    const arrival = addDays(now.date, days);
-    let r = zoneRoom(zone); // capacity - fixed - stock - active leases, today
-    for (const x of byZone.get(zone) ?? []) {
-      const sp = x.item.space_m2_per_unit;
-      r += Math.min(x.onHand, demandOver(x.model, now, days * 24)) * sp; // stock used up before arrival frees room
-      r -= poWithin(x.pos, now.date, days) * sp; // incoming POs take room
-    }
-    r -= leases.filter((x) => x.zone_id === zone && x.status === "RESERVED" && x.start_date <= arrival).reduce((a, x) => a + x.area, 0);
-    return Math.max(0, r - (promised.get(zone) ?? 0));
-  };
-  const pools = (it: Item) => [it.zone_id, ...(rentZones.has(it.zone_id) && it.zone_id !== overflow ? [overflow] : [])];
-  const roomUnits = (it: Item) => Math.floor(pools(it).reduce((a, z) => a + roomAt(z, it.lead_time_days), 0) / it.space_m2_per_unit + 1e-9);
-  const promise = (it: Item, area: number) => {
-    let left = area;
-    for (const z of pools(it)) { const t = Math.min(left, roomAt(z, it.lead_time_days)); promised.set(z, (promised.get(z) ?? 0) + t); left -= t; }
-  };
+  const room = roomModel(cfg, live, now);
+  const { roomUnits, promise } = room;
 
   interface Cand {
     it: Item; l: Live; rop: number; position: number; qty: number; minQty: number; cost: number; rank: number; crit: string; urgency: number;
@@ -121,13 +131,15 @@ export function replenishmentAgent(group: string, trigger: string): AgentResult 
     const step = round[it.unit] ?? 1;
     const fit = Math.floor(roomUnits(it) / step) * step;
     const need = c.qty;
+    // room lost to signed leases (a lease beats a new purchase): what the zones would hold without tenants minus what they hold now
+    const leasedM2 = fit < c.qty ? Math.max(0, room.roomUnits(it, false) - roomUnits(it)) * it.space_m2_per_unit : 0;
     if (fit < c.qty) {
       if (fit <= 0) {
         deferred++;
-        plan.push([it.item_id, c.rank, c.qty, c.minQty, c.cost, "DEFERRED", JSON.stringify([M("repl.r.noroom", { need: c.qty, unit: it.unit }), M("repl.r.below", { position: c.position, rop: c.rop, unit: it.unit, lead: it.lead_time_days })]), c.rop, c.position, sim.tick]);
+        plan.push([it.item_id, c.rank, c.qty, c.minQty, c.cost, "DEFERRED", JSON.stringify([M(leasedM2 > 0 ? "repl.r.noroom_leased" : "repl.r.noroom", { need: c.qty, unit: it.unit, leased: leasedM2 }), M("repl.r.below", { position: c.position, rop: c.rop, unit: it.unit, lead: it.lead_time_days })]), c.rop, c.position, sim.tick]);
         continue;
       }
-      staged = M("repl.r.staged", { room: fit, need: c.qty, rest: c.qty - fit, unit: it.unit });
+      staged = M(leasedM2 > 0 ? "repl.r.staged_leased" : "repl.r.staged", { room: fit, need: c.qty, rest: c.qty - fit, unit: it.unit, leased: leasedM2 });
       c.qty = fit; c.minQty = Math.min(c.minQty, fit); c.cost = fit * it.unit_cost_omr;
     }
     const parts: Msg[] = [M("repl.r.below", { position: c.position, rop: c.rop, unit: it.unit, lead: it.lead_time_days })];
@@ -160,7 +172,7 @@ export function replenishmentAgent(group: string, trigger: string): AgentResult 
     const payload = {
       item_id: it.item_id, qty: q, suggested_qty: qty, edited, unit: it.unit, unit_cost: it.unit_cost_omr, cost: q * it.unit_cost_omr,
       supplier_id: it.supplier_id, lead_days: it.lead_time_days, expected_arrival: addDays(now.date, it.lead_time_days), priority: c.rank,
-      status, reason, ctx: recContext(l), room: { need, qty, staged: !!staged }, reopen_reason: reopen ?? existing?.payload.reopen_reason ?? null,
+      status, reason, ctx: recContext(l), room: { need, qty, staged: !!staged, leased_m2: leasedM2 }, reopen_reason: reopen ?? existing?.payload.reopen_reason ?? null,
     };
     if (reopen) {
       reopenRec(key, payload);

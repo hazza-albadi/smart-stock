@@ -4,3 +4,4 @@ export * from "./inventory";
 export * from "./space";
 export * from "./budget";
 export * from "./explain";
+export * from "./rental";

@@ -11,13 +11,14 @@ import { KpiStrip, RiskList } from "./RiskPanel";
 import FeedPanel, { type FeedMove } from "./FeedPanel";
 import StockTable from "./StockTable";
 import AgentPanel, { type Analysis } from "./AgentPanel";
-import SpacePanel from "./SpacePanel";
 import PlanPanel from "./PlanPanel";
 import ImpactPanel from "./ImpactPanel";
 import ManualPanel from "./ManualPanel";
 import SettingsPanel from "./SettingsPanel";
 import ItemDrawer from "./ItemDrawer";
 import { GuideTour, HelpModal } from "./Help";
+import SectionNav from "./SectionNav";
+import SpaceView from "./space/SpaceView";
 import { Btn, Modal, Tabs } from "./ui";
 
 const EMPTY_NAMES = {};
@@ -30,16 +31,18 @@ function queued<T>(fn: () => Promise<T>): Promise<T> {
   chain = run.catch(() => undefined);
   return run;
 }
+/** A refusal from the server; `msg` (when present) is a plain-language message the UI renders in the chosen language. */
+class ApiError extends Error { constructor(m: string, public msg?: Msg) { super(m); } }
 async function http<T>(url: string, body?: unknown, method = "POST"): Promise<T> {
   const res = await fetch(url, body === undefined ? undefined : { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((j as { error?: string }).error ?? `${url} ${res.status}`);
+  if (!res.ok) throw new ApiError((j as { error?: string }).error ?? `${url} ${res.status}`, (j as { msg?: Msg }).msg);
   return j as T;
 }
 
 interface TickEvent { id: number; severity: string; type: string; msg: Msg; tick: number }
 interface TickResult { ignored?: string; movements: FeedMove[]; events: TickEvent[]; critical: TickEvent[]; paused: boolean }
-interface Toast { id: number; msg: Msg; undo?: number; tone?: "ok" | "bad" }
+interface Toast { id: number; msg: Msg; undo?: number; undoUrl?: string; tone?: "ok" | "bad" }
 interface Confirm { title: string; body: string; action: string; danger?: boolean; resolve: (v: boolean) => void }
 
 export default function Dashboard() {
@@ -55,12 +58,16 @@ export default function Dashboard() {
   const [analysis, setAnalysis] = useState<Analysis>({ running: false, step: 0 });
   const [auditing, setAuditing] = useState(false);
   const [pauseEvents, setPauseEvents] = useState<TickEvent[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorRaw] = useState<string | Msg | null>(null);
+  const setError = (e: string | Msg | null) => setErrorRaw(e);
+  const fail = (e: unknown) => setError(e instanceof ApiError && e.msg ? e.msg : String((e as Error).message ?? e));
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmDlg, setConfirmDlg] = useState<Confirm | null>(null);
   const [help, setHelp] = useState(false);
   const [tour, setTour] = useState(false);
-  const [tab, setTab] = useState("space");
+  const [tab, setTab] = useState("plan");
+  const [section, setSectionRaw] = useState<"purchasing" | "space">("purchasing");
+  const setSection = (x: "purchasing" | "space") => { setSectionRaw(x); try { localStorage.setItem("ss-section", x); } catch { /* ignore */ } };
 
   const queue = useRef<FeedMove[]>([]);
   const draining = useRef(false);
@@ -79,12 +86,16 @@ export default function Dashboard() {
     try {
       const l = localStorage.getItem("ss-lang") as Lang | null;
       if (l === "ar" || l === "en") setLang(l);
-      setTheme((document.documentElement.getAttribute("data-theme") as "light" | "dark") || "light");
+      setTheme(localStorage.getItem("ss-theme") === "dark" ? "dark" : "light");
+      const sec = localStorage.getItem("ss-section");
+      if (sec === "space" || sec === "purchasing") setSectionRaw(sec);
       if (!localStorage.getItem("ss-guide-done")) setTour(true);
     } catch { /* ignore */ }
   }, []);
   useEffect(() => { document.documentElement.lang = lang; document.documentElement.dir = lang === "ar" ? "rtl" : "ltr"; try { localStorage.setItem("ss-lang", lang); } catch { /* ignore */ } }, [lang]);
-  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); try { localStorage.setItem("ss-theme", theme); } catch { /* ignore */ } }, [theme]);
+  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
+  // only an explicit choice is remembered; a new visitor always starts in the light theme
+  const toggleTheme = () => setTheme((t) => { const n = t === "dark" ? "light" : "dark"; try { localStorage.setItem("ss-theme", n); } catch { /* ignore */ } return n; });
   const closeTour = () => { setTour(false); try { localStorage.setItem("ss-guide-done", "1"); } catch { /* ignore */ } };
 
   // first load: show the stored state; a reload always resumes PAUSED
@@ -96,7 +107,7 @@ export default function Dashboard() {
       setFeed([...cur.recent_movements] as unknown as FeedMove[]);
       setMoreLeft(cur.recent_movements.length >= cur.sim.page_size);
       setReady(true);
-    }).catch((e) => setError(String(e)));
+    }).catch((e) => fail(e));
   }, []);
 
   // ---- staggered reveal of movements: rows glide in one after another (transform/opacity only) ----
@@ -142,7 +153,7 @@ export default function Dashboard() {
         const res = await queued(() => http<{ snapshot: Snapshot; result: TickResult }>("/api/sim", { action: "tick", expected, auto: true }));
         if (off) return;
         apply(res);
-      } catch (e) { setError(String((e as Error).message)); return; }
+      } catch (e) { fail(e); return; }
       timer = setTimeout(loop, Math.max(100, intervalRef.current - (Date.now() - t0)));
     };
     loop();
@@ -151,7 +162,7 @@ export default function Dashboard() {
 
   const sim = async (body: Record<string, unknown>) => {
     setBusy(true);
-    try { apply(await queued(() => http("/api/sim", body))); } catch (e) { setError(String((e as Error).message)); } finally { setBusy(false); }
+    try { apply(await queued(() => http("/api/sim", body))); } catch (e) { fail(e); } finally { setBusy(false); }
   };
 
   const confirm: AppApi["confirm"] = (o) => new Promise((resolve) => setConfirmDlg({ ...o, resolve }));
@@ -180,22 +191,28 @@ export default function Dashboard() {
     const rec = getSnapshot()?.recs.find((r) => r.id === id);
     const p = rec?.payload ?? {};
     if (rec?.kind === "PO") return d === "APPROVED" ? { k: "toast.po_approved", v: { qty: p.qty, unit: p.unit, item: rec.item_id } } : { k: "toast.po_rejected", v: { item: rec.item_id } };
-    if (rec?.kind === "SPACE") return { k: d === "APPROVED" ? "toast.space_approved" : "toast.space_rejected", v: { company: p.company } };
     return { k: d === "APPROVED" ? "toast.msg_approved" : "toast.msg_rejected", v: { supplier: p.supplier_name } };
   };
   const decide: AppApi["decide"] = async (id, decision, o) => {
     const msg = decisionMsg(id, decision);
     try { const r = await post(`/api/recommendations/${id}`, { decision, ...o }); pushToast({ msg, undo: r.decision_id, tone: decision === "APPROVED" ? "ok" : "bad" }); }
-    catch (e) { setError(String((e as Error).message)); }
+    catch (e) { fail(e); }
   };
   const postpone: AppApi["postpone"] = async (id) => {
     const hours = getSnapshot()?.sim.postpone_hours ?? 24;
-    try { await post(`/api/recommendations/${id}`, { postpone: true }, "PATCH"); pushToast({ msg: { k: "toast.postponed", v: { hours } } }); } catch (e) { setError(String((e as Error).message)); }
+    try { await post(`/api/recommendations/${id}`, { postpone: true }, "PATCH"); pushToast({ msg: { k: "toast.postponed", v: { hours } } }); } catch (e) { fail(e); }
   };
-  const editQty: AppApi["editQty"] = async (id, qty) => { try { await post(`/api/recommendations/${id}`, { qty }, "PATCH"); } catch (e) { setError(String((e as Error).message)); } };
-  const undo = async (decisionId: number, toastIdx: number) => {
+  const editQty: AppApi["editQty"] = async (id, qty) => { try { await post(`/api/recommendations/${id}`, { qty }, "PATCH"); } catch (e) { fail(e); } };
+  const undo = async (decisionId: number, toastIdx: number, url = "/api/undo") => {
     setToasts((x) => x.filter((y) => y.id !== toastIdx));
-    try { await post("/api/undo", { decision_id: decisionId }); pushToast({ msg: { k: "toast.undone" } }); } catch (e) { setError(String((e as Error).message)); }
+    try { await post(url, { decision_id: decisionId }); pushToast({ msg: { k: "toast.undone" } }); } catch (e) { fail(e); }
+  };
+  const spaceAct: AppApi["spaceAct"] = async (url, body, toast) => {
+    try {
+      const r = await post(url, body);
+      if (toast) pushToast({ msg: toast, undo: r.decision_id, undoUrl: "/api/space/undo", tone: "ok" });
+      return true;
+    } catch (e) { fail(e); return false; }
   };
 
   const loadMoreFeed = async () => {
@@ -220,26 +237,26 @@ export default function Dashboard() {
         setSnapshot(res.snapshot);
         await sleep(300);
       }
-    } catch (e) { setError(String((e as Error).message)); }
+    } catch (e) { fail(e); }
     setAnalysis({ running: false, step: 0 });
   };
 
   const audit = async () => {
     setAuditing(true);
     try {
-      const r = await queued(() => http<{ snapshot: Snapshot; failures: { name: string; detail: string }[] }>("/api/audit", {}));
+      const r = await queued(() => http<{ snapshot: Snapshot; failures: { name: string; detail: string; flow?: string }[] }>("/api/audit", {}));
       setSnapshot(r.snapshot);
-      if (r.failures.length) setError(`${T("health.failed")} ${r.failures.map((f) => `${f.name}: ${f.detail}`).join(" | ")}`);
-    } catch (e) { setError(String((e as Error).message)); }
+      if (r.failures.length) setError(`${T("health.failed")} ${r.failures.map((f) => `[${f.flow === "space" ? T("flow.space") : T("flow.purchasing")}] ${f.name}: ${f.detail}`).join(" | ")}`);
+    } catch (e) { fail(e); }
     setAuditing(false);
   };
 
   const goTab = useCallback((id: string) => { setTab(id); setTimeout(() => document.getElementById("more")?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); }, []);
 
   const api: AppApi = useMemo(() => ({
-    lang, ...makeApi(lang, names, startDate), decide, postpone, editQty, select: setSelected, post, goTab, confirm,
+    lang, ...makeApi(lang, names, startDate), decide, postpone, editQty, select: setSelected, post, goTab, confirm, spaceAct, section, setSection,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [lang, names, startDate, post, goTab]);
+  }), [lang, names, startDate, post, goTab, section]);
   const { T, R, N } = api;
 
   const decidedCount = useSnap((s) => s.sim.decided) ?? 0;
@@ -250,16 +267,16 @@ export default function Dashboard() {
       <div className="mx-auto max-w-[1500px] space-y-4 p-4" aria-busy="true">
         <div className="skeleton h-16 rounded-xl" />
         <div className="grid gap-4 lg:grid-cols-12"><div className="lg:col-span-7"><DecisionSkeleton /></div><div className="skeleton h-[480px] rounded-xl lg:col-span-5" /></div>
-        {error && <div role="alert" className="rounded-lg border border-crit bg-crit-soft px-3 py-2 text-sm text-crit">{error}</div>}
+        {error && <div role="alert" className="rounded-lg border border-crit bg-crit-soft px-3 py-2 text-sm text-crit">{typeof error === "string" ? error : ""}</div>}
       </div>
     );
   }
 
-  const tabs = [
-    { id: "space", label: T("tab.space") }, { id: "plan", label: T("tab.plan") }, { id: "history", label: T("tab.history") },
-    { id: "agents", label: T("tab.agents") }, { id: "manual", label: T("tab.manual") }, { id: "settings", label: T("tab.settings") },
-  ];
+  const moreTabs = (section === "space"
+    ? [{ id: "history", label: T("tab.history") }, { id: "agents", label: T("tab.agents") }, { id: "settings", label: T("tab.settings") }]
+    : [{ id: "plan", label: T("tab.plan") }, { id: "history", label: T("tab.history") }, { id: "agents", label: T("tab.agents") }, { id: "manual", label: T("tab.manual") }, { id: "settings", label: T("tab.settings") }]);
 
+  const curTab = moreTabs.some((x) => x.id === tab) ? tab : moreTabs[0].id;
   return (
     <AppCtx.Provider value={api}>
       <BusyCtx.Provider value={busy}>
@@ -268,7 +285,7 @@ export default function Dashboard() {
             onPlay={() => { setPauseEvents(null); sim({ action: "play" }); }} onPause={() => sim({ action: "pause" })}
             onStep={() => sim({ action: "tick", expected: getSnapshot()?.sim.tick })} onAdvance={(o) => sim({ action: "advance", ...o })}
             onReset={resetAll} onInterval={(ms) => sim({ action: "interval", ms })} onAutoPause={(v) => sim({ action: "auto_pause", value: v })}
-            onLang={() => setLang((l) => (l === "ar" ? "en" : "ar"))} onTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))} onHelp={() => setHelp(true)} />
+            onLang={() => setLang((l) => (l === "ar" ? "en" : "ar"))} onTheme={toggleTheme} onHelp={() => setHelp(true)} />
 
           {/* overlays never push the page: they are fixed */}
           {pauseEvents && !running && (
@@ -286,33 +303,37 @@ export default function Dashboard() {
           )}
           {error && (
             <div role="alert" className="fixed inset-x-3 top-[84px] z-30 mx-auto flex max-w-2xl items-start justify-between gap-3 rounded-xl border-2 border-crit bg-crit-soft px-3 py-2 text-sm text-crit shadow-xl">
-              <span>{error}</span><button type="button" onClick={() => setError(null)} aria-label={T("dismiss")} className="min-h-10 min-w-10">✕</button>
+              <span>{typeof error === "string" ? error : R(error)}</span><button type="button" onClick={() => setError(null)} aria-label={T("dismiss")} className="min-h-10 min-w-10">✕</button>
             </div>
           )}
 
+          <SectionNav />
           <main className="mx-auto max-w-[1500px] space-y-4 px-3 py-4 sm:px-4">
-            <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
-              <div className="min-w-0 lg:col-span-7"><DecisionCenter /></div>
-              <div className="min-w-0 space-y-4 lg:col-span-5"><KpiStrip /><RiskList /></div>
-            </div>
+            {section === "space" ? <SpaceView feed={feed} onMore={loadMoreFeed} moreLeft={moreLeft} flash={flash} shown={shown} /> : (
+              <>
+                <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
+                  <div className="min-w-0 lg:col-span-7"><DecisionCenter /></div>
+                  <div className="min-w-0 space-y-4 lg:col-span-5"><KpiStrip /><RiskList /></div>
+                </div>
 
-            <section aria-label={T("recent.title")}>
-              <h2 className="mb-2 text-lg font-bold">{T("recent.title")}</h2>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-                <div className="min-w-0 lg:col-span-5"><FeedPanel feed={feed} onMore={loadMoreFeed} moreLeft={moreLeft} /></div>
-                <div className="min-w-0 lg:col-span-7"><StockTable flash={flash} shown={shown} /></div>
-              </div>
-            </section>
+                <section aria-label={T("recent.title")}>
+                  <h2 className="mb-2 text-lg font-bold">{T("recent.title")}</h2>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+                    <div className="min-w-0 lg:col-span-5"><FeedPanel feed={feed} onMore={loadMoreFeed} moreLeft={moreLeft} flow="purchasing" /></div>
+                    <div className="min-w-0 lg:col-span-7"><StockTable flash={flash} shown={shown} /></div>
+                  </div>
+                </section>
+              </>
+            )}
 
             <section id="more" className="card scroll-mt-24 overflow-hidden" aria-label={T("more.title")}>
-              <Tabs label={T("more.title")} value={tab} onChange={setTab} tabs={tabs} />
-              <div id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`}>
-                {tab === "space" && <SpacePanel />}
-                {tab === "plan" && <PlanPanel />}
-                {tab === "history" && <ImpactPanel version={`${Math.floor(tick / 6)}-${decidedCount}`} />}
-                {tab === "agents" && <AgentPanel analysis={analysis} onAnalyse={analyse} />}
-                {tab === "manual" && <ManualPanel />}
-                {tab === "settings" && <SettingsPanel auditing={auditing} onAudit={audit} />}
+              <Tabs label={T("more.title")} value={curTab} onChange={setTab} tabs={moreTabs} />
+              <div id={`panel-${curTab}`} role="tabpanel" aria-labelledby={`tab-${curTab}`}>
+                {curTab === "plan" && section === "purchasing" && <PlanPanel />}
+                {curTab === "history" && <ImpactPanel key={section} flow={section} version={`${Math.floor(tick / 6)}-${decidedCount}`} />}
+                {curTab === "agents" && <AgentPanel analysis={analysis} onAnalyse={analyse} />}
+                {curTab === "manual" && section === "purchasing" && <ManualPanel />}
+                {curTab === "settings" && <SettingsPanel auditing={auditing} onAudit={audit} />}
               </div>
             </section>
             <footer className="pb-24 text-center text-xs text-muted">{T("footer")} · <span className="num">{N(tick)}</span></footer>
@@ -335,7 +356,7 @@ export default function Dashboard() {
             {toasts.map((t) => (
               <div key={t.id} className={`pointer-events-auto flex items-center justify-between gap-3 rounded-xl border border-s-4 bg-surface px-3 py-2 text-sm shadow-lg ${t.tone === "bad" ? "border-crit" : "border-ok"}`}>
                 <span>{R(t.msg)}</span>
-                {t.undo !== undefined && <button type="button" onClick={() => undo(t.undo as number, t.id)} className="min-h-10 shrink-0 rounded-lg border border-line px-3 font-semibold text-brand hover:bg-surface2">{T("toast.undo")}</button>}
+                {t.undo !== undefined && <button type="button" onClick={() => undo(t.undo as number, t.id, t.undoUrl)} className="min-h-10 shrink-0 rounded-lg border border-line px-3 font-semibold text-brand hover:bg-surface2">{T("toast.undo")}</button>}
               </div>
             ))}
           </div>

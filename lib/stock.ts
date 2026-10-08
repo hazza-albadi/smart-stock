@@ -14,14 +14,21 @@ export function addMovement(date: string, itemId: string, type: "IN" | "OUT", qt
     .run(`SIM-${String(n).padStart(6, "0")}`, date, itemId, type, qty, ref, totalOnHand(itemId), getSim().tick, lotId, actor);
 }
 
-/** Physical room (m2) left in a zone: capacity - fixed - stock held there - area of tenants whose lease is active. */
+/** Physical room (m2) left in a zone for new deliveries: capacity - fixed - stock held there - area of signed rentals (not yet ended). */
 export function zoneRoom(zone: string): number {
   const d = db();
   const z = d.prepare(`SELECT capacity_m2 c, fixed_occupied_m2_aisles_equipment f FROM warehouse_zones WHERE zone_id=?`).get(zone) as { c: number; f: number };
   const used = (d.prepare(`SELECT COALESCE(SUM(c.quantity_on_hand*i.space_m2_per_unit),0) m FROM current_stock c JOIN items i ON i.item_id=c.item_id WHERE c.zone_id=?`).get(zone) as { m: number }).m;
-  const ten = (d.prepare(`SELECT COALESCE(SUM(area),0) a FROM leases WHERE zone_id=? AND status='ACTIVE'`).get(zone) as { a: number }).a;
+  const ten = (d.prepare(`SELECT COALESCE(SUM(area),0) a FROM space_leases WHERE zone_id=? AND status IN ('RESERVED','ACTIVE') AND end_date>?`).get(zone, getSim().sim_date) as { a: number }).a; // a signed rental protects its area from new deliveries from signing on
   return physicalRoom({ capacity: z.c, fixed: z.f, stockUsed: used, tenantsActive: ten });
 }
+
+/** Room before tenants: capacity - fixed - stock held there. Leases are taken off by the caller for the date it cares about. */
+export const zoneRoomBase = (zone: string): number => {
+  const z = db().prepare(`SELECT capacity_m2 c, fixed_occupied_m2_aisles_equipment f FROM warehouse_zones WHERE zone_id=?`).get(zone) as { c: number; f: number };
+  const used = (db().prepare(`SELECT COALESCE(SUM(c.quantity_on_hand*i.space_m2_per_unit),0) m FROM current_stock c JOIN items i ON i.item_id=c.item_id WHERE c.zone_id=?`).get(zone) as { m: number }).m;
+  return z.c - z.f - used;
+};
 
 /** FEFO issue: takes up to `qty` from the lots (earliest expiry first), one movement per lot. Returns the quantity issued. */
 export function issueFefo(item: Item, qty: number, date: string, ref: string, actor = "system"): number {

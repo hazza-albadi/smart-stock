@@ -17,15 +17,15 @@ export function readDay0State() {
   const plan = all(`SELECT item_id, rank, qty, cost, status, rop, position FROM replenishment_plan ORDER BY rank, item_id`)
     .map((p) => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, typeof v === "number" ? r6(v) : v])));
   const alerts = all(`SELECT key, kind, item_id, severity FROM alerts WHERE active=1 ORDER BY key`);
-  const space = all(`SELECT request_id, payload FROM recommendations WHERE kind='SPACE' ORDER BY request_id`).map((r) => {
-    const p = JSON.parse(r.payload);
-    return { request_id: r.request_id, decision: p.decision, area_m2: r6(p.area_m2), allocations: (p.allocations as any[]).map((a) => ({ zone_id: a.zone_id, area: r6(a.area) })) };
-  });
+  // potentially listable windows from the Space Forecast (nothing is listed, no offers exist on day 0)
+  const space_windows = all(`SELECT zone_id, start_date, end_date, area, confidence, state, to_horizon FROM space_forecasts WHERE state IN ('NEW','HELD') ORDER BY zone_id, start_date, area DESC`)
+    .map((w) => Object.fromEntries(Object.entries(w).map(([k, v]) => [k, typeof v === "number" ? r6(v) : v])));
+  const space_flow = { listings: all(`SELECT COUNT(*) n FROM space_listings`)[0].n, offers: all(`SELECT COUNT(*) n FROM space_offers`)[0].n, leases: all(`SELECT COUNT(*) n FROM space_leases`)[0].n, pool: all(`SELECT COUNT(*) n FROM space_requests`)[0].n };
   const recs = all(`SELECT kind, key, status FROM recommendations ORDER BY key`);
   return {
     sim: all(`SELECT sim_date FROM sim_state`)[0]?.sim_date ?? null,
     zones, rentable_by_zone, rentable_total: r6(Object.values(rentable_by_zone).reduce((a: number, b) => a + (b as number), 0)),
     budget: { total: budgetRow.t, committed: r6(committed), free: r6(budgetRow.t - committed) },
-    forecasts, plan, alerts, space_proposals: space, recommendations: recs,
+    forecasts, plan, alerts, space_windows, space_flow, recommendations: recs,
   };
 }

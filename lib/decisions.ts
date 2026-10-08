@@ -2,12 +2,10 @@ import { db } from "./db";
 import { addDays, addMonths } from "./time";
 import { clockAt, tickOf } from "./clock";
 import { deliveryHour } from "./calc";
-import { getSim, getItems, logEvent, M, type Item, type Msg } from "./core";
+import { getSim, getItems, logEvent, M, UserError, type Item, type Msg } from "./core";
 import { loadSettings } from "./settings";
 import { loadLive } from "./live";
-import { budgetInfo, recContext } from "./agents/replenishment";
-import { availableFor, leaseEnd } from "./agents/matching";
-import { computeZones } from "./agents/space";
+import { budgetInfo, recContext, roomModel } from "./agents/replenishment";
 import { runAll } from "./agents/coordinator";
 import { issueFefo, receiveGoods, totalOnHand } from "./stock";
 
@@ -61,6 +59,10 @@ export function decide(id: number, decision: "APPROVED" | "REJECTED", opts: Deci
       const ctx = live ? recContext(live) : p.ctx;
       if (ok) {
         const qty = Math.max(1, Math.floor(opts.qty ?? p.qty));
+        // same-hour collision: a lease signed meanwhile may have taken the room this order needs; checked inside this transaction
+        const rm = roomModel(cfg, loadLive(cfg, { date: s.sim_date, hour: s.hour }), { date: s.sim_date, hour: s.hour });
+        const withLeases = rm.roomUnits(it), without = rm.roomUnits(it, false);
+        if (qty > withLeases && qty <= without) throw new UserError(M("sp.err.po_collision", { item: it.item_id, qty, max: withLeases, unit: it.unit }));
         const r = placePo(it, qty, { emergency: !!p.emergency, recKey: rec.key, source: "AGENT" });
         ref = r.poId;
         detail = { po: r.poId, qty, suggested: p.suggested_qty ?? p.qty, cost: r.cost, arrival: r.arrival, hour: r.hour, over_budget: r.over, cover: ctx?.cover, stockout_hours: ctx?.stockout_hours };
@@ -76,29 +78,6 @@ export function decide(id: number, decision: "APPROVED" | "REJECTED", opts: Deci
       detail = { effect: "none" };
       logEvent("MSG", rec.item_id, M(ok ? "ev.msg_approved" : "ev.msg_rejected", { supplier: p.supplier_name }), "info", { ref: rec.key, actor: "user" });
       d.prepare(`UPDATE recommendations SET status=?, decided_tick=? WHERE id=?`).run(decision, s.tick, id);
-    } else if (rec.kind === "SPACE") {
-      const req = d.prepare(`SELECT * FROM space_requests WHERE request_id=?`).get(rec.request_id) as { request_id: string; company: string; needed_from: string; duration_months: number; area_needed_m2: number };
-      let allocations: { zone_id: string; area: number }[] = [];
-      if (ok && p.decision !== "REJECT") {
-        allocations = (opts.variant === "split" && p.split ? p.split : p.allocations) as typeof allocations;
-        if (opts.area !== undefined && allocations.length === 1) allocations = [{ zone_id: allocations[0].zone_id, area: Math.max(1, Math.min(opts.area, allocations[0].area)) }];
-        const start = req.needed_from > s.sim_date ? req.needed_from : s.sim_date;
-        const zones = computeZones().map((z) => ({ zone_id: z.zone_id, rentable: z.rentable, rent_allowed: z.rent_allowed }));
-        const avail = availableFor(zones, start, leaseEnd(req, start));
-        for (const a of allocations) if ((avail.get(a.zone_id) ?? 0) + 1e-6 < a.area) throw new Error(`space in ${a.zone_id} is no longer available`);
-        const end = leaseEnd(req, start);
-        for (const a of allocations) d.prepare(`INSERT INTO leases(request_id,company,zone_id,area,start_date,end_date,status,decided_tick) VALUES(?,?,?,?,?,?,?,?)`)
-          .run(req.request_id, req.company, a.zone_id, a.area, start, end, start <= s.sim_date ? "ACTIVE" : "RESERVED", s.tick);
-        detail = { allocations, start, end, variant: opts.variant ?? "primary", modified: opts.area !== undefined };
-        logEvent("SPACE_APPROVED", null, M("ev.space_approved", { req: req.request_id, company: req.company, list: allocations.map((a) => `${Math.round(a.area)}|${a.zone_id}`).join(","), start, end }), "info", { ref: req.request_id, actor: "user" });
-      } else if (ok) {
-        detail = { effect: "decline" };
-        logEvent("SPACE_APPROVED", null, M("ev.space_declined", { req: req.request_id, company: req.company }), "info", { ref: req.request_id, actor: "user" });
-      } else {
-        logEvent("SPACE_REJECTED", null, M("ev.space_rejected", { req: req.request_id, company: req.company }), "info", { ref: req.request_id, actor: "user" });
-      }
-      d.prepare(`UPDATE recommendations SET status=?, decided_tick=?, payload=? WHERE id=?`).run(decision, s.tick, JSON.stringify({ ...p, approved_allocations: allocations }), id);
-      ref = req.request_id;
     }
     decisionId = audit(rec.kind, { rec, decision, ref, detail });
   })();
@@ -142,10 +121,6 @@ export function undo(decisionId: number) {
       d.prepare(`DELETE FROM recommendations WHERE key=? AND id<>?`).run(base, rec.id);
       delete p.po_id;
       d.prepare(`UPDATE recommendations SET status='PENDING', key=?, decided_tick=NULL, payload=? WHERE id=?`).run(base, JSON.stringify({ ...p, cost: p.qty * p.unit_cost * (1 + (p.emergency ? loadSettings().n("po.emergency_premium") : 0)) }), rec.id);
-    } else if (dec.kind === "SPACE" && dec.decision === "APPROVED") {
-      d.prepare(`DELETE FROM leases WHERE request_id=?`).run(rec.request_id);
-      delete p.approved_allocations;
-      d.prepare(`UPDATE recommendations SET status='PENDING', decided_tick=NULL, payload=? WHERE id=?`).run(JSON.stringify(p), rec.id);
     } else if (dec.decision === "REJECTED" || dec.kind === "SUPPLIER_MSG") {
       delete p.decision_ctx;
       d.prepare(`UPDATE recommendations SET status='PENDING', decided_tick=NULL, payload=? WHERE id=?`).run(JSON.stringify(p), rec.id);
@@ -229,7 +204,7 @@ export function manualMovement(o: { item: string; kind: "receipt" | "issue" | "a
   return moved;
 }
 
-/** A new space request appears (manual entry); space matching proposes a decision for it immediately. */
+/** A potential tenant is added to the pool (test data). It stays invisible until a published listing attracts it. */
 export function createSpaceRequest(o: { company: string; type: string; area: number; months: number; from: string }) {
   const d = db();
   const s = getSim();
@@ -242,7 +217,6 @@ export function createSpaceRequest(o: { company: string; type: string; area: num
     audit("SPACE_REQUEST_NEW", { req: id, decision: "CREATE", detail: o });
     logEvent("SPACE_REQUEST", null, M("ev.space_request", { req: id, company: o.company, area: o.area, from: o.from }), "info", { ref: id, actor: "user" });
   })();
-  runAll({ group: `${s.tick}#request`, trigger: "request" });
   return id;
 }
 

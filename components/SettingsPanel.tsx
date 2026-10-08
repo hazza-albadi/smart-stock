@@ -32,6 +32,9 @@ export default function SettingsPanel({ auditing, onAudit }: { auditing: boolean
           {health ? `${health.passed === health.total ? "✓" : "⚠"} ${T("health.result")}: ` : T("health.never")}
           {health && <span className="num">{N(health.passed)}/{N(health.total)}</span>}
         </span>
+        {health?.by_flow && (["purchasing", "space"] as const).map((f) => (
+          <span key={f} className="rounded-full bg-surface2 px-2.5 py-0.5 text-xs font-semibold">{T(`flow.${f}`)}: <span className="num">{N(health.by_flow[f].passed)}/{N(health.by_flow[f].total)}</span></span>
+        ))}
       </div>
       <h3 className="mt-6 text-sm font-bold">{T("settings.title")}</h3>
       <p className="mt-1 text-sm text-muted">{T("settings.sub")}</p>

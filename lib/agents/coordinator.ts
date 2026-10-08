@@ -1,18 +1,18 @@
 import { forecastAgent } from "./forecast";
 import { replenishmentAgent } from "./replenishment";
-import { spaceAgent } from "./space";
+import { spaceAgent } from "../zones";
 import { alertAgent } from "./alerts";
-import { matchingAgent } from "./matching";
+import { spacePlan } from "../space/agent";
 import { getSim, type AgentResult } from "../core";
 import { loadSettings, type Settings } from "../settings";
 
-export const AGENT_ORDER = ["forecast", "replenishment", "space", "alerts", "matching"] as const;
+export const AGENT_ORDER = ["forecast", "replenishment", "space", "alerts", "spaceplan"] as const;
 export type AgentName = (typeof AGENT_ORDER)[number];
 
-/** Settings key holding the hours of day at which each agent runs (matching has no clock schedule: it follows space / decisions). */
+/** Settings key holding the hours of day at which each agent runs (the Space Forecast also runs after every decision). */
 const SCHEDULE: Record<AgentName, string | null> = {
   forecast: "schedule.forecast_hours", replenishment: "schedule.replenishment_hours", space: "schedule.space_hours",
-  alerts: "schedule.alerts_hours", matching: null,
+  alerts: "schedule.alerts_hours", spaceplan: "schedule.space_plan_hours",
 };
 
 export function runAgent(name: AgentName, group: string, trigger: string): AgentResult {
@@ -21,11 +21,11 @@ export function runAgent(name: AgentName, group: string, trigger: string): Agent
     case "replenishment": return replenishmentAgent(group, trigger);
     case "space": return spaceAgent(group, trigger);
     case "alerts": return alertAgent(group, trigger);
-    case "matching": return matchingAgent(group, trigger);
+    case "spaceplan": return spacePlan(group, trigger);
   }
 }
 
-/** Coordinator: runs the five agents in order (Forecast -> Replenishment -> Space -> Alert -> Space Matching). */
+/** Coordinator: runs the five agents in order (Forecast -> Replenishment -> Zones -> Alert -> Space Forecast). */
 export function runAll(opts: { group?: string; trigger?: string } = {}) {
   const group = opts.group ?? `${getSim().tick}#all`;
   const out: Record<string, AgentResult> = {};
@@ -36,8 +36,6 @@ export function runAll(opts: { group?: string; trigger?: string } = {}) {
 /** Agents due at the current simulated hour according to the schedule settings (always in coordinator order). */
 export function dueAgents(cfg: Settings, hour: number): AgentName[] {
   const due = AGENT_ORDER.filter((a) => SCHEDULE[a] && cfg.j<number[]>(SCHEDULE[a] as string).includes(hour));
-  // space matching follows the space agent: rentable area may have changed
-  if (due.includes("space") && !due.includes("matching")) due.push("matching");
   return due;
 }
 

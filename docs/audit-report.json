@@ -8,27 +8,27 @@
   "runs": [
     {
       "seed": 42,
-      "checks": 8051,
+      "checks": 12377,
       "failures": 0,
-      "fingerprint": "bf0011961ef9c83750d05d409f7390e4",
-      "seconds": 114,
-      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-27304-42.db"
+      "fingerprint": "cd3eb7e0380a15d3df8ddd11f22a8a88",
+      "seconds": 10905,
+      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-12960-42.db"
     },
     {
       "seed": 7,
-      "checks": 8051,
+      "checks": 12377,
       "failures": 0,
-      "fingerprint": "4d0af1e8f6fdeb739d14554ee25996ad",
-      "seconds": 99,
-      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-27304-7.db"
+      "fingerprint": "658b3a0e54cb29277f8efba570d46acd",
+      "seconds": 69,
+      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-12960-7.db"
     },
     {
       "seed": 2026,
-      "checks": 8051,
+      "checks": 12377,
       "failures": 0,
-      "fingerprint": "d8a724ce2e8bfe7010c73497a2d1709e",
-      "seconds": 79,
-      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-27304-2026.db"
+      "fingerprint": "278a79e7734c60d81dbeb0760e713c7b",
+      "seconds": 170,
+      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-12960-2026.db"
     }
   ],
   "determinism": {

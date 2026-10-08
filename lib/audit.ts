@@ -3,11 +3,15 @@ import { loadSettings } from "./settings";
 import { getSim } from "./core";
 import { dailyQuantity, demandMultiplier, type SeasonCfg, type EventCfg } from "./calc";
 import { snapshot } from "./snapshot";
+import { diffDays } from "./time";
+import { maxListableRaw } from "./space/forecast";
 import fs from "node:fs";
 import path from "node:path";
 import { parseCsv } from "./csv";
 
-export interface Check { name: string; ok: boolean; detail: string }
+export interface Check { name: string; ok: boolean; detail: string; flow?: "purchasing" | "space" | "both" }
+/** Checks that belong to the rental flow; every other check is purchasing (or shared stock/zone data). */
+const SPACE_CHECKS = new Set(["leased_plus_company_need_within_capacity", "listed_area_within_free_window", "income_equals_price_area_days", "no_offer_without_published_matching_listing", "space_decisions_timestamped_with_consequence", "no_offers_before_a_listing", "space_ui_matches_database"]);
 const all = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).all(...a) as T[];
 const one = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).get(...a) as T;
 const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps * Math.max(1, Math.abs(a), Math.abs(b));
@@ -54,7 +58,7 @@ export function hourlyInvariants(): Check[] {
   // zones: independent recomputation straight from SQL
   const zr = all(`SELECT w.zone_id, w.capacity_m2 cap, w.fixed_occupied_m2_aisles_equipment fx, w.reserved_buffer_m2 rs, w.rent_allowed ra,
       COALESCE((SELECT SUM(c.quantity_on_hand*i.space_m2_per_unit) FROM current_stock c JOIN items i ON i.item_id=c.item_id WHERE c.zone_id=w.zone_id),0) st,
-      COALESCE((SELECT SUM(area) FROM leases WHERE zone_id=w.zone_id AND status='ACTIVE'),0) ten FROM warehouse_zones w`);
+      COALESCE((SELECT SUM(area) FROM space_leases WHERE zone_id=w.zone_id AND status='ACTIVE'),0) ten FROM warehouse_zones w`);
   const bad: string[] = [];
   let sumUsed = 0, sumRent = 0;
   for (const z of zr) {
@@ -67,26 +71,77 @@ export function hourlyInvariants(): Check[] {
     if (!s) { bad.push(`${z.zone_id} missing`); continue; }
     if (!near(s.used, used)) bad.push(`${z.zone_id} used ${s.used} vs ${used}`);
     if (!near(s.net, net)) bad.push(`${z.zone_id} rentable ${s.net} vs ${net}`);
-    if (used + z.ten > z.cap + 1e-6) bad.push(`${z.zone_id} above capacity: ${used + z.ten} > ${z.cap}`);
+    if (used + z.ten > z.cap + 1e-6 && !(z.ten > 0 && one(`SELECT 1 FROM alerts WHERE key=? AND active=1`, `LEASE_OVER:${z.zone_id}`))) bad.push(`${z.zone_id} above capacity: ${used + z.ten} > ${z.cap}`);
     if (z.ra !== "yes" && s.net !== 0) bad.push(`${z.zone_id} not rentable but shows ${s.net}`);
   }
   if (!near(snap.zones.reduce((a, z) => a + z.used, 0), sumUsed)) bad.push("sum of zones used differs from warehouse total");
   if (!near(snap.kpi.rentable_m2, sumRent)) bad.push(`rentable total ${snap.kpi.rentable_m2} vs ${sumRent}`);
   add("zones_used_rentable_capacity", bad);
 
-  // leases: never above what the zone can hold; at-risk commitments must be flagged by an alert
-  const lb: string[] = [];
-  for (const z of snap.zones.filter((x) => x.rent_allowed)) {
-    const committed = all(`SELECT COALESCE(SUM(area),0) a FROM leases WHERE zone_id=? AND status IN ('RESERVED','ACTIVE') AND end_date>?`, z.zone_id, snap.sim.date)[0].a;
-    if (committed > z.rentable + 1e-6 && !all(`SELECT 1 FROM alerts WHERE key=? AND active=1`, `LEASE_RISK:${z.zone_id}`).length) lb.push(`${z.zone_id}: committed ${committed} > rentable ${z.rentable} without a lease-risk alert`);
+  // ---- space flow invariants ----
+  const sp = snap.space;
+  const cfg = loadSettings();
+  const dpm = cfg.n("space.days_per_month");
+  // leased area + the company's own need (fixed + stock held there) never exceeds the zone capacity at any hour
+  const cap: string[] = [];
+  for (const z of all(`SELECT w.zone_id, w.capacity_m2 c, w.fixed_occupied_m2_aisles_equipment f,
+      COALESCE((SELECT SUM(x.quantity_on_hand*i.space_m2_per_unit) FROM current_stock x JOIN items i ON i.item_id=x.item_id WHERE x.zone_id=w.zone_id),0) st,
+      COALESCE((SELECT SUM(area) FROM space_leases WHERE zone_id=w.zone_id AND status IN ('RESERVED','ACTIVE') AND start_date<=? AND ?<end_date),0) ls FROM warehouse_zones w`, snap.sim.date, snap.sim.date))
+    if (z.f + z.st + z.ls > z.c + 1e-6 && !one(`SELECT 1 FROM alerts WHERE key=? AND active=1`, `LEASE_OVER:${z.zone_id}`)) cap.push(`${z.zone_id}: leased ${Math.round(z.ls)} + need ${Math.round(z.f + z.st)} > ${z.c}`);
+  add("leased_plus_company_need_within_capacity", cap);
+  // listed area never exceeds what the forecast leaves free (otherwise a conflict must be flagged)
+  const lst: string[] = [];
+  const flagged = new Set(all(`SELECT inputs FROM space_forecasts WHERE state='CONFLICT'`).map((r) => JSON.parse(r.inputs).listing_id));
+  for (const l of all(`SELECT * FROM space_listings WHERE status IN ('DRAFT','PUBLISHED','PAUSED')`)) {
+    const rest = l.area - one(`SELECT COALESCE(SUM(area),0) a FROM space_leases WHERE listing_id=?`, l.id).a;
+    const room = maxListableRaw(cfg, l.zone_id, l.start_date < snap.sim.date ? snap.sim.date : l.start_date, l.end_date, l.id);
+    if (rest > room + (rest * cfg.n("space.conflict_tolerance_pct")) / 100 + 1e-6 && !flagged.has(l.id)) lst.push(`listing ${l.id}: ${rest} m² listed, forecast leaves ${room}`);
+    if (rest > 0 && l.status === "PUBLISHED" && l.published_tick === null) lst.push(`listing ${l.id} published without a time`);
   }
-  add("leases_within_rentable_or_flagged", lb);
+  add("listed_area_within_free_window", lst);
+  // income = price x area x days leased
+  const inc: string[] = [];
+  for (const l of all(`SELECT * FROM space_leases`)) {
+    const dur = diffDays(l.end_date, l.start_date);
+    // the day's rent is booked by the first hourly step of that day, so at hour 0 of a state it is not booked yet
+    const expectDays = l.status === "ENDED" ? dur : l.status === "ACTIVE" ? Math.max(0, Math.min(dur, diffDays(snap.sim.date, l.start_date) + (snap.sim.hour >= 1 ? 1 : 0))) : 0;
+    if (l.income_days !== expectDays) inc.push(`lease ${l.id}: ${l.income_days} days vs ${expectDays}`);
+    if (!near(l.income, (l.area * l.price / dpm) * l.income_days)) inc.push(`lease ${l.id}: income ${l.income} vs ${(l.area * l.price / dpm) * l.income_days}`);
+  }
+  add("income_equals_price_area_days", inc);
+  // no offer without a published matching listing; cold / hazardous (and any zone that is not for rent) never listed, offered or leased
+  const off: string[] = [];
+  for (const o of all(`SELECT o.*, l.published_tick, l.zone_id lz FROM space_offers o LEFT JOIN space_listings l ON l.id=o.listing_id`)) {
+    if (o.lz === null || o.lz === undefined) { off.push(`offer ${o.id}: no listing`); continue; }
+    if (o.published_tick === null || o.arrived_tick < o.published_tick) off.push(`offer ${o.id}: arrived before the listing was published`);
+    const rq = one(`SELECT required_storage_type t FROM space_requests WHERE request_id=?`, o.request_id);
+    if (!rq || rq.t !== cfg.s("space.rentable_request_type")) off.push(`offer ${o.id}: storage type ${rq?.t} cannot be offered`);
+    if (one(`SELECT rent_allowed r FROM warehouse_zones WHERE zone_id=?`, o.lz)?.r !== "yes") off.push(`offer ${o.id}: zone not for rent`);
+  }
+  for (const t of ["space_listings", "space_leases"]) for (const r of all(`SELECT x.id FROM ${t} x JOIN warehouse_zones w ON w.zone_id=x.zone_id WHERE w.rent_allowed<>'yes'`)) off.push(`${t} ${r.id} in a zone that is not for rent`);
+  add("no_offer_without_published_matching_listing", off);
+  // every space decision has a timestamp and a visible consequence
+  const sdc: string[] = [];
+  for (const d of all(`SELECT * FROM space_decisions`)) {
+    if (d.tick === null || d.tick === undefined) { sdc.push(`space decision ${d.id}: no timestamp`); continue; }
+    if (d.kind === "OFFER" && (d.action === "ACCEPT" || d.action === "COUNTER_ACCEPTED") && !one(`SELECT 1 FROM space_leases WHERE id=?`, d.lease_id)) sdc.push(`space decision ${d.id}: no lease`);
+    if (d.kind === "LISTING" && (d.action === "PUBLISH" || d.action === "DRAFT") && !one(`SELECT 1 FROM space_listings WHERE id=?`, d.listing_id)) sdc.push(`space decision ${d.id}: no listing`);
+    if (d.kind === "KEEP_VACANT" && !d.reeval_date) sdc.push(`space decision ${d.id}: no re-evaluation date`);
+  }
+  add("space_decisions_timestamped_with_consequence", sdc);
+  // day 0: nothing from the tenant pool is visible before a listing exists
+  add("no_offers_before_a_listing", one(`SELECT COUNT(*) n FROM space_offers`).n > 0 && !one(`SELECT 1 FROM space_listings WHERE published_tick IS NOT NULL`) ? ["offers exist but nothing was ever published"] : []);
+  // the UI shows what the database holds
+  const sdb: string[] = [];
+  if (!near(sp.kpi.leased_m2, one(`SELECT COALESCE(SUM(area),0) a FROM space_leases WHERE status IN ('RESERVED','ACTIVE')`).a)) sdb.push("leased area differs");
+  if (!near(sp.kpi.income_total, one(`SELECT COALESCE(SUM(income),0) a FROM space_leases`).a)) sdb.push("income differs");
+  if (sp.kpi.offers_waiting !== one(`SELECT COUNT(*) n FROM space_offers WHERE status='PENDING'`).n) sdb.push("waiting offers differ");
+  add("space_ui_matches_database", sdb);
 
   // recommendations: no duplicate pending ones
   add("no_duplicate_pending_recommendations", [
     ...all(`SELECT key, COUNT(*) n FROM recommendations WHERE status='PENDING' GROUP BY key HAVING n>1`).map((r) => `${r.key} ×${r.n}`),
     ...all(`SELECT item_id, COUNT(*) n FROM recommendations WHERE status='PENDING' AND kind='PO' AND source='agent' GROUP BY item_id HAVING n>1`).map((r) => `PO draft ${r.item_id} ×${r.n}`),
-    ...all(`SELECT request_id, COUNT(*) n FROM recommendations WHERE status='PENDING' AND kind='SPACE' GROUP BY request_id HAVING n>1`).map((r) => `space ${r.request_id} ×${r.n}`),
   ]);
 
   // decisions: timestamped, with a visible consequence or an explicit "no effect"
@@ -96,7 +151,6 @@ export function hourlyInvariants(): Check[] {
     const det = JSON.parse(d.detail ?? "{}");
     if (d.kind === "PO" && d.decision === "APPROVED" && !one(`SELECT 1 FROM purchase_orders_open WHERE po_id=?`, det.po)) db_.push(`decision ${d.id}: PO ${det.po} missing`);
     if (d.kind === "PO" && d.decision === "REJECTED" && one(`SELECT status FROM recommendations WHERE id=?`, d.rec_id)?.status === "APPROVED") db_.push(`decision ${d.id}: rejected but approved`);
-    if (d.kind === "SPACE" && d.decision === "APPROVED" && det.allocations && !all(`SELECT 1 FROM leases WHERE request_id=?`, d.request_id).length) db_.push(`decision ${d.id}: no lease created`);
     if (d.kind === "SUPPLIER_MSG" && det.effect !== "none") db_.push(`decision ${d.id}: message decision without explicit no-effect`);
   }
   add("decisions_timestamped_with_consequence", db_);
@@ -150,14 +204,15 @@ export function dailyInvariants(): Check[] {
 }
 
 export function runInvariants(full = true): Check[] {
-  return [...hourlyInvariants(), ...(full ? dailyInvariants() : [])];
+  return [...hourlyInvariants(), ...(full ? dailyInvariants() : [])].map((c) => ({ ...c, flow: SPACE_CHECKS.has(c.name) ? "space" as const : "purchasing" as const }));
 }
 
 /** Stores the result so the UI can show the "data health" indicator. */
 export function recordAudit(kind: string, checks: Check[]) {
   const failures = checks.filter((c) => !c.ok);
   const s = getSim();
-  db().prepare(`INSERT INTO audit_results(tick,ts,kind,passed,total,failures) VALUES(?,?,?,?,?,?)`)
-    .run(s.tick, new Date().toISOString(), kind, checks.length - failures.length, checks.length, JSON.stringify(failures));
+  const by = (f: string) => { const l = checks.filter((c) => (c.flow ?? (SPACE_CHECKS.has(c.name) ? "space" : "purchasing")) === f); return { passed: l.filter((c) => c.ok).length, total: l.length }; };
+  db().prepare(`INSERT INTO audit_results(tick,ts,kind,passed,total,failures,by_flow) VALUES(?,?,?,?,?,?,?)`)
+    .run(s.tick, new Date().toISOString(), kind, checks.length - failures.length, checks.length, JSON.stringify(failures), JSON.stringify({ purchasing: by("purchasing"), space: by("space") }));
   return { passed: checks.length - failures.length, total: checks.length, failures };
 }

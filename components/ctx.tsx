@@ -23,6 +23,10 @@ export interface AppApi {
   name: (itemId: string | null | undefined) => string;
   name2: (itemId: string | null | undefined) => string;
   decide: (id: number, d: "APPROVED" | "REJECTED", o?: { qty?: number; variant?: string; area?: number }) => Promise<void>;
+  /** A decision of the space flow: posts it, shows a toast (with Undo when the server returns a decision id) and reports a refusal in plain words. Resolves true when it worked. */
+  spaceAct: (url: string, body: unknown, toast?: Msg) => Promise<boolean>;
+  section: "purchasing" | "space";
+  setSection: (s: "purchasing" | "space") => void;
   postpone: (id: number) => Promise<void>;
   editQty: (id: number, qty: number) => Promise<void>;
   select: (itemId: string) => void;

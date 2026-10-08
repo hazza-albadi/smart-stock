@@ -172,3 +172,57 @@ test("structural sharing keeps the identity of unchanged parts (so only changed 
   assert.equal(c.sim.tick, 2);
   assert.equal(share(a, JSON.parse(JSON.stringify(a))), a);
 });
+
+// ---------------------------------------------------------------- rental formulas (lib/calc/rental.ts)
+import { freeWindows, listableArea, confidenceOf, arrivalProbability, arrivalDelayHours, bidPrice, counterAcceptProbability, dailyIncome } from "../lib/calc";
+import { addDays as addDay } from "../lib/time";
+
+const days = (n: number, from = "2026-10-05") => Array.from({ length: n }, (_, i) => addDay(from, i));
+const wc = { minBlock: 100, minDays: 14, step: 10, maxLayers: 4, startBuffer: 0 };
+
+test("free windows: a constant free area is one window; the area is the lowest day, rounded down", () => {
+  const w = freeWindows(days(60), new Array(60).fill(537), wc, (d) => addDay(d, 1));
+  assert.deepEqual(w.map((x) => [x.start, x.end, x.area, x.toHorizon]), [["2026-10-05", "2026-12-04", 530, true]]);
+});
+
+test("free windows: space that frees up later gives a stacked second window; short or small periods are dropped", () => {
+  const free = [...new Array(20).fill(500), ...new Array(40).fill(900)];
+  const w = freeWindows(days(60), free, { ...wc, minDays: 14 }, (d) => addDay(d, 1));
+  assert.equal(w[0].area, 500);
+  assert.ok(w.some((x) => x.area === 400 && x.start === "2026-10-25"), "the extra 400 m2 from day 20");
+  assert.equal(freeWindows(days(10), new Array(10).fill(900), wc, (d) => addDay(d, 1)).length, 0, "shorter than the minimum lease");
+  assert.equal(freeWindows(days(60), new Array(60).fill(90), wc, (d) => addDay(d, 1)).length, 0, "smaller than the minimum block");
+});
+
+test("free windows: space that only frees up in the future starts a few days later (forecast error buffer)", () => {
+  const free = [...new Array(10).fill(0), ...new Array(50).fill(400)];
+  const [w] = freeWindows(days(60), free, { ...wc, startBuffer: 3 }, (d) => addDay(d, 1));
+  assert.equal(w.start, addDay("2026-10-05", 13));
+  const [now] = freeWindows(days(60), new Array(60).fill(400), { ...wc, startBuffer: 3 }, (d) => addDay(d, 1));
+  assert.equal(now.start, "2026-10-05", "space free today is not delayed");
+});
+
+test("listable area: capacity - need - leased, safety margin applied, minus what is already listed", () => {
+  assert.equal(listableArea(1000, 400, 100, 0, 10), 450);
+  assert.equal(listableArea(1000, 400, 100, 200, 10), 250);
+  assert.equal(listableArea(1000, 950, 100, 0, 10), 0);
+  assert.equal(confidenceOf(10, 30, 60), "high"); assert.equal(confidenceOf(45, 30, 60), "medium"); assert.equal(confidenceOf(90, 30, 60), "low");
+});
+
+test("market model: price above the band lowers the chance and delays offers; below the market speeds them up; bids never exceed the listing", () => {
+  const m = { market: 4, bandPct: 20, baseProb: 0.9, sensitivity: 2, delayMin: 24, delayMax: 96 };
+  assert.equal(arrivalProbability(4, m), 0.9);
+  assert.equal(arrivalProbability(4.8, m), 0.9, "inside the band");
+  assert.ok(arrivalProbability(5.6, m) < 0.9 && arrivalProbability(5.6, m) > 0);
+  assert.equal(arrivalProbability(12, m), 0);
+  assert.ok(arrivalDelayHours(2.4, 0.5, m) < arrivalDelayHours(4, 0.5, m) && arrivalDelayHours(4, 0.5, m) < arrivalDelayHours(6, 0.5, m));
+  for (const d of [0, 0.3, 0.7, 1]) assert.ok(bidPrice(3.5, 4, 10, d) <= 3.5);
+  assert.ok(counterAcceptProbability({ area: 500, price: 4 }, { area: 500, price: 4 }, 0.7, 2) === 0.7);
+  assert.ok(counterAcceptProbability({ area: 500, price: 4 }, { area: 500, price: 4.4 }, 0.7, 2) < 0.7);
+  assert.ok(counterAcceptProbability({ area: 500, price: 4 }, { area: 250, price: 4 }, 0.7, 2) < 0.7);
+});
+
+test("rent per day = area x price per month / days per month", () => {
+  assert.equal(dailyIncome(600, 4, 30), 80);
+  assert.equal(dailyIncome(500, 4, 0), 0);
+});

@@ -4,18 +4,18 @@ import { getSim, logRun, logEvent, upsertRec, M, type AgentResult, type Item, ty
 import { loadSettings } from "../settings";
 import { loadLive } from "../live";
 import { coverHours } from "../calc";
-import { holdingLeases, computeZones } from "./space";
+import { computeZones } from "../zones";
 
 const SEV_ORDER: Severity[] = ["Critical", "High", "Monitor", "Info"];
 const EVENT_SEV = { Critical: "critical", High: "high", Monitor: "info", Info: "info" } as const;
 
 interface A {
-  key: string; kind: string; item_id: string | null; severity: Severity; title: Msg; detail: Msg[]; ignore: Msg | null; rec_key?: string;
+  key: string; kind: string; item_id: string | null; severity: Severity; title: Msg; detail: Msg[]; ignore: Msg | null; rec_key?: string; flow?: "purchasing" | "both";
 }
 /** Only genuinely critical situations pause the simulation: expiry inside 24 h and a delayed critical PO (a real stock-out is logged by the engine). */
 const PAUSE_KINDS = ["EXPIRY", "DELAYED_PO"];
 const evSeverity = (a: { kind: string; severity: Severity }) => (a.kind === "DECISION_OVERDUE" ? "high" : EVENT_SEV[a.severity]);
-const evOpts = (a: { key: string; kind: string; severity: Severity }) => ({ ref: a.key, meta: { pause: a.severity === "Critical" && PAUSE_KINDS.includes(a.kind) } });
+const evOpts = (a: { key: string; kind: string; severity: Severity; flow?: "purchasing" | "both" }) => ({ ref: a.key, flow: a.flow, meta: { pause: a.severity === "Critical" && PAUSE_KINDS.includes(a.kind) } });
 const lastsH = (l: { onHand: number; weeklyUsage: number }) => coverHours(l.onHand, l.weeklyUsage);
 const hrs = (h: number) => Math.max(0, Math.round(h));
 
@@ -161,20 +161,16 @@ export function alertAgent(group: string, trigger: string): AgentResult {
       detail: [M("alert.space_over.d1")], ignore: null });
   }
 
-  // --- lease commitments at risk: approved/active leases exceed what stock still leaves rentable ---
-  const leases = holdingLeases().filter((x) => x.end_date > now.date);
-  for (const z of computeZones().filter((x) => x.rent_allowed)) {
-    const mine = leases.filter((x) => x.zone_id === z.zone_id);
-    const committed = mine.reduce((s, x) => s + x.area, 0);
-    if (committed > z.rentable + 1e-6) {
-      const anyActive = mine.some((x) => x.status === "ACTIVE");
-      alerts.push({
-        key: `LEASE_RISK:${z.zone_id}`, kind: "LEASE_RISK", item_id: null, severity: anyActive ? "Critical" : "High",
-        title: M("alert.lease_risk.title", { zone: z.zone_id, short: committed - z.rentable }),
-        detail: [M("alert.lease_risk.d1", { committed, rentable: z.rentable, list: mine.map((x) => `${x.request_id}|${Math.round(x.area)}|${x.start_date}`).join(",") })],
-        ignore: M("alert.ignore.lease_risk", { short: committed - z.rentable }),
-      });
-    }
+  // --- an order draft was cut because tenants hold the space (a signed lease beats a new purchase): shown in BOTH flows ---
+  for (const r of d.prepare(`SELECT key, item_id, payload FROM recommendations WHERE kind='PO' AND status='PENDING'`).all() as { key: string; item_id: string; payload: string }[]) {
+    const p = JSON.parse(r.payload);
+    if (!(p.room?.leased_m2 > 0)) continue;
+    alerts.push({
+      key: `LEASE_LIMITS_PO:${r.item_id}`, kind: "LEASE_LIMITS_PO", item_id: r.item_id, severity: "High", flow: "both",
+      title: M("alert.sp.po_limited.title", { item: r.item_id, qty: p.qty, need: p.room.need, unit: p.unit }),
+      detail: [M("alert.sp.po_limited.d1", { leased: p.room.leased_m2, item: r.item_id, qty: p.qty, need: p.room.need, unit: p.unit })],
+      ignore: M("alert.sp.po_limited.ignore", { item: r.item_id }),
+    });
   }
 
   // --- recommendations left undecided too long ---
@@ -196,17 +192,17 @@ export function alertAgent(group: string, trigger: string): AgentResult {
   }
 
   // ---- persist alerts (new / escalated ones also become events) ----
-  const existing = new Map((d.prepare(`SELECT key, severity, active FROM alerts`).all() as { key: string; severity: string; active: number }[]).map((r) => [r.key, r]));
+  const existing = new Map((d.prepare(`SELECT key, severity, active FROM alerts WHERE kind NOT IN ('LISTING_RISK','LEASE_OVER')`).all() as { key: string; severity: string; active: number }[]).map((r) => [r.key, r]));
   const seen = new Set<string>();
   let newCount = 0;
-  const st = { ins: d.prepare(`INSERT INTO alerts(key,kind,item_id,severity,title,detail,ignore_msg,rec_key,active,first_tick,updated_tick) VALUES(?,?,?,?,?,?,?,?,1,?,?)`),
+  const st = { ins: d.prepare(`INSERT INTO alerts(key,kind,item_id,severity,title,detail,ignore_msg,rec_key,active,first_tick,updated_tick,flow) VALUES(?,?,?,?,?,?,?,?,1,?,?,?)`),
     upd: d.prepare(`UPDATE alerts SET severity=?,title=?,detail=?,ignore_msg=?,rec_key=?,active=1,updated_tick=?,first_tick=CASE WHEN active=0 THEN ? ELSE first_tick END WHERE key=?`) };
   for (const a of alerts) {
     seen.add(a.key);
     const ex = existing.get(a.key);
     const j = [JSON.stringify(a.title), JSON.stringify(a.detail), a.ignore ? JSON.stringify(a.ignore) : null];
     if (!ex) {
-      st.ins.run(a.key, a.kind, a.item_id, a.severity, ...j, a.rec_key ?? null, sim.tick, sim.tick);
+      st.ins.run(a.key, a.kind, a.item_id, a.severity, ...j, a.rec_key ?? null, sim.tick, sim.tick, a.flow ?? "purchasing");
       newCount++;
       if (a.severity !== "Info") logEvent("ALERT", a.item_id, a.title, evSeverity(a), evOpts(a));
     } else {

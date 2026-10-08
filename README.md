@@ -5,7 +5,15 @@ Next.js (App Router) + TypeScript + Tailwind, SQLite (`better-sqlite3`). Arabic 
 locally: no cloud, no login, no API key needed.
 
 The clock advances **one simulated hour per tick**. Stock movements, deliveries, expiries and decisions happen at a precise date and hour,
-five coordinating agents re-run on a schedule, and every decision you take (approve / reject / edit / manual action) changes what happens next.
+coordinating agents re-run on a schedule, and every decision you take changes what happens next.
+
+The app has **two separate flows**, each with its own tab at the top, KPIs, "Needs your decision" queue (count and age), risks and activity feed:
+
+* **Purchasing / المشتريات** — stock, forecasts, reorder points, purchase orders, supplier messages, the purchasing budget (OMR).
+* **Space / المساحات** — a real rental process over time: *forecast the space we will not need → decide (keep empty or list) → published listing → offers arrive → accept / reject / counter-offer → lease and rental income*.
+  Rental income is shown separately and is never mixed with the purchasing budget. Details: [Space rental flow](#space-rental-flow) and `docs/space-flow/`.
+
+The top bar (clock, speed, language, theme) and the live movement feed are shared. **The app opens in the light theme** for every new visitor (whatever the system theme); only an explicit choice is remembered.
 
 ## Install and run
 
@@ -17,8 +25,9 @@ npm run dev      # http://localhost:3000
 
 | command | what it does |
 |---|---|
-| `npm test` | unit + integration tests (calc layer, i18n keys, day-0 baseline, ticks, decisions, leases, manual actions) |
-| `npm run audit [days] [seeds…]` | number audit: 30 days × 3 seeds on a throw-away DB, ~9 min, fails loudly (writes `docs/audit-report.json`, `docs/hourly-vs-daily.md`) |
+| `npm test` | unit + integration tests (calc layer, i18n keys, colour contrast, day-0 baseline, ticks, decisions, manual actions, **space flow: forecast windows, listing rules, offers, counter-offers, leases and income, conflicts a–f, determinism, separation**) |
+| `npm run audit [days] [seeds…]` | number audit: 30 days × 3 seeds on a throw-away DB (scripted purchasing **and space** decisions), fails loudly (writes `docs/audit-report.json`, `docs/hourly-vs-daily.md`) |
+| `npm run locales` | regenerates `locales/en.json` and `locales/ar.json` from the four wording scripts (the last one, `locales_space.py`, holds the Space texts) |
 | `npm run check [hours]` | prints the acceptance picture (day 0, or after N hours) rendered in English |
 | `npm run literals` | repo-wide search for hard-coded item/zone/request/PO ids, budget and rate literals in `app/`, `components/`, `lib/` |
 | `npm run baseline` | regenerates `docs/baseline.json` (day-0 state + tsc/build/check results) from a fresh DB — only run on purpose |
@@ -26,31 +35,48 @@ npm run dev      # http://localhost:3000
 Optional: `ANTHROPIC_API_KEY` lets a model polish supplier-message wording when you press **Run analysis** (numbers stay deterministic).
 
 ## Screen layout (answers three questions, in this order)
-1. **Needs your decision** — one card per suggestion (order, supplier message, storage request) with *why*, *if you approve*, *if you do nothing*, one big action button, Reject and Postpone. Undo toast after every decision.
-2. **What is at risk** — four key numbers (with ⓘ formulas) and the risk list (details on click).
-3. **What happened recently** — live movements and the stock table.
-Everything else is in the tabbed **More** card: storage space, purchase plan, what happened after your decisions, automatic checks, do-it-yourself actions, settings and data check.
+
+Under the sticky top bar, a **section switch** (Purchasing | Space) shows how many decisions wait in each.
+
+**Purchasing**
+1. **Needs your decision** — one card per suggestion (order, supplier message) with *why*, *if you approve*, *if you do nothing*, one big action button, Reject and Postpone. Undo toast after every decision. A yellow warning appears when approving an order would take space that is listed for rent.
+2. **What is at risk** — four key numbers (risk, budget, orders on the way, waiting) with ⓘ formulas, and the risk list (details on click).
+3. **What happened recently** — live movements (shared) and the stock table; the activity tab shows purchasing events only.
+
+**Space**
+1. A **flow bar** — *Forecast → Decide → Listing → Offers → Leases* — with a count per stage and the next action highlighted.
+2. **Needs your decision** (conflicts first, then offers, then free windows) next to the Space KPIs (can be listed, on the market, rented out, rental income) and the Space risks.
+3. **Listings and offers**, **Rentals and income**, the **Free-space forecast** (windows with formula, and why other periods cannot be listed), **Demand we cannot serve** (cold / hazardous companies, informational), and the Space activity feed.
+
+Everything else is in the tabbed **More** card of each section: purchase plan, what happened after your decisions (both flows, each entry tagged), automatic checks, do-it-yourself actions, settings and the data check (counts per flow).
 The sticky top bar shows the date/time, running/paused and why, the speed in words, Start/Pause, +1 hour, Speed ▾ and More ▾ menus, Help (tour, 2-minute demo, glossary), language and theme.
 
 ## 2-minute demo script (also inside the app: Help → 2-minute demo)
 
-1. Open the page: **Mon 5 Oct 2026 – 00:00**. Read "Needs your decision" and "What is at risk". A first-run tour explains the screen (skippable).
+1. Open the page: **Mon 5 Oct 2026 – 00:00**. Read "Needs your decision" and "What is at risk". A first-run tour (6 steps) explains the screen (skippable).
 2. Press **Start** (Speed ▾ lets you change *1 hour = 5 seconds*). Movements appear under "What happened recently".
 3. Frozen shrimp shells run out on 7 Oct: the clock **pauses itself** and says "Paused: critical event – decide now".
 4. In "Needs your decision" press the green button of the frozen-shrimp order. A toast offers **Undo**. The order arrives at its hour later; the budget drops now.
-5. **Reject** another order and keep running: the shortage grows because nothing was ordered; the suggestion comes back only after the waiting time or when clearly worse.
-6. **More ▾ → Jump to next day**, watch the delivery arrive. Open **Storage space**, approve a customer request, watch the free space change when the rental starts.
-7. Open **After your decisions**: each decision with what it led to, in plain sentences. Click any **ⓘ** to see how a number is calculated, any **?** for a definition.
-8. **More ▾ → Start over** (asks for confirmation) restores the starting situation.
+5. **Reject** another order and keep running: the shortage grows because nothing was ordered.
+6. **More ▾ → Jump to next day**, watch the delivery arrive.
+7. Open **After your decisions**: each decision with what it led to, in plain sentences (tagged Purchasing / Space).
+8. **The space story.** Open the second tab, **Space**. The forecast shows free space we will *not* need (on day 0: about 770 m² in Z1 from early November and about 790 m² in Z5 from late October; the empty space today is 1,400 m²).
+9. Press **List 770 m² for 6 months at 4.000 OMR per m²**, check the price (an assumed figure) and publish. Nothing from the companies was visible before this.
+10. Press Start and wait one or two days: **offers arrive**. Read the six checks. Accept one, send a **counter-offer** (the form is prefilled with what still works) to another, **reject** the third.
+11. When the rental starts the area is held; rent is counted every day under *Rentals and income*; the impact log tells the story in sentences.
+12. Back in Purchasing approve a large order for a general-storage item: if it needs space you listed, a **warning appears in both sections** and the listing can be shrunk, paused or withdrawn. A signed rental is never cancelled.
+13. **More ▾ → Start over** (asks for confirmation) restores the starting situation.
 
 ## Agent schedule (configurable in Settings)
 
 | agent | runs |
 |---|---|
-| alerts (cheap rules: stock-out, expiry, delayed PO, safety, anomaly, overdue decisions, lease risk) | every hour |
-| forecast | daily 06:00 |
-| replenishment, space optimisation | daily 08:00 and on demand (**Run analysis**) |
-| space matching | after the space agent, after every decision, and when a space request is added |
+| alerts (cheap rules: stock-out, expiry, delayed PO, safety, anomaly, overdue decisions, orders cut by rented space) | every hour |
+| forecast (demand) | daily 06:00 |
+| replenishment, zone check | daily 08:00 and on demand (**Run analysis**) |
+| **Space Forecast** (free windows, blocked periods, conflicts with purchasing) | every hour (`schedule.space_plan_hours`) and after every decision |
+
+The space *process* itself (offers arriving, offers expiring, counter-offers answered, leases starting / ending, rent accruing) is part of the hourly engine tick, not an agent.
 
 Movement booking, stock-out and expiry checks run in the engine every hour. Each tick is one database transaction. Stock-dependent figures (cover, usable stock,
 stock-out projection, rentable space) are always computed live from the tables; the forecast agent only refreshes demand parameters.
@@ -75,9 +101,8 @@ faster than the interval, so two tabs or a reload can never double-tick. The bro
 * **Approve PO**: committed to the budget immediately, placed with the item's real lead time, arrives at its date/hour (stock, movements, space change then). Quantity can be edited first.
 * **Reject / ignore**: nothing is ordered, the shortage can really worsen (stock-outs follow from the data). Undecided drafts show their age and escalate to an *overdue* alert (Critical when the stock-out is near).
   A rejected draft is remembered with its time; it returns only after `repl.reject_cooldown_hours` or when cover fell below `repl.reopen_cover_drop` × the cover at rejection, and it says why.
-* **Space**: approving creates leases from `needed_from` for the requested months; rentable space drops from the start date, ends return the area, matching of other requests considers overlapping leases,
-  and an alert fires when stock growth endangers a commitment. You can approve, accept a split, modify the area, or reject.
-* **Manual**: emergency / manual PO (shorter lead time, price premium), manual stock movement (receipt / issue / adjustment with a mandatory reason), new space request. All audited in `decisions`.
+* **Space**: see [Space rental flow](#space-rental-flow). Every space decision is stamped with the simulated time, changes later hours (offers only after a listing, a lease holds area, rent accrues) and shows in the impact log.
+* **Manual**: emergency / manual PO (shorter lead time, price premium), manual stock movement (receipt / issue / adjustment with a mandatory reason). All audited in `decisions`.
 * **Decision impact log**: effects are computed from the event chain, movements and `demand_log`; nothing is written by hand.
 
 ## UX notes
@@ -89,15 +114,48 @@ faster than the interval, so two tabs or a reload can never double-tick. The bro
 * All formulas live in the pure module `lib/calc` (unit-tested). Components only format what they receive; "how is this calculated" popovers show formula, inputs (units, sources) and result.
 * Numerals follow the language (Arabic-Indic digits in Arabic), OMR with 3 decimals, units everywhere, never NaN / Infinity / `-0`.
 * `npm run audit` checks, at **every hour** of a 30-day run for 3 seeds (with scripted decisions): stock balance per lot and per item, no negative stock, budget committed/free and PO values vs the CSV and decisions,
-  zones (used = fixed + stock, rentable, no zone above capacity, sums), leases vs rentable (or an explicit alert), no duplicate pending recommendations, every decision timestamped with a consequence or an explicit "no effect",
-  clock consistency, UI numbers = independent SQL recomputation; **daily**: 24 hourly amounts = daily quantity for every item/day and issued = movements; plus day-0 = `docs/baseline.json`, same seed → same result, different seed → different result.
+  zones (used = fixed + stock, rentable, no zone above capacity, sums), no duplicate pending recommendations, every decision timestamped with a consequence or an explicit "no effect",
+  clock consistency, UI numbers = independent SQL recomputation; **space**: leased area + the company's own need never exceed zone capacity (every day of the forecast and every hour), listed area never exceeds what the forecast leaves free (or a conflict is flagged), rent = price × area × days leased, no offer without a published matching listing (cold / hazardous / not-for-rent zones are never listed, offered or leased), every space decision has a timestamp and a visible consequence, Space UI numbers = SQL; **daily**: 24 hourly amounts = daily quantity for every item/day and issued = movements; plus day-0 = `docs/baseline.json`, same seed → same result, different seed → different result.
 * The **Data health** pill in the top bar shows the last audit; the button runs the same checks on the live database.
 * Hourly vs daily: `docs/hourly-vs-daily.md` (generated) and `docs/daily-engine-crosscheck.md` (verified against the previous engine, 22/24 items identical, the other two explained by stock-out/expiry).
+
+## Space rental flow
+
+Separate code (`lib/space/*`, `components/space/*`, `app/api/space/*`, tables `space_*`, translation keys `sp.*`, `ev.sp.*`, `impact.sp.*`, `alert.sp.*`, `tests/space.test.ts`). Shared with purchasing: the clock, the movement / stock / zone tables and the settings.
+Purchasing code never reads or writes the `space_*` tables; the only rental data it sees is *occupancy*: `leasedOn(zone, date)` in `lib/zones.ts` (a test enforces this). The Space Forecast reads purchasing outputs
+(open POs, PO drafts, stock, demand forecast) because the company's own need depends on them.
+
+**The flow in six lines**
+1. **Forecast** — the Space Forecast agent projects, per rentable zone and day (≥ 90 days, `space.forecast_days`), the space the company itself needs (fixed + kept free + stock moved day by day by the seasonal demand forecast and by the open POs; PO drafts only as a warning) and derives *free windows* "N m² in Z will not be needed from A to B" with a confidence level and the safety margin (`space.safety_margin_pct`). Every window has the ⓘ formula with its inputs.
+2. **Decide** — per window the manager chooses **Keep empty** (until a re-evaluation date, optional reason; no listing, no offers, income stays zero) or **List for rent** (area, dates, monthly price per m², suggested from settings). A listing the forecast does not allow is refused with the order that needs the space and the date.
+3. **Listing** — `DRAFT → PUBLISHED ⇄ PAUSED → WITHDRAWN / LEASED`. Only published listings receive offers.
+4. **Offers** — after publishing, companies from the tenant pool (`space_requests.csv`) send offers after a seeded delay, depending on the price (above the market band: later or never; below the market: sooner). Only the rentable storage type can become an offer; cold and hazardous demand is shown in *Demand we cannot serve* with the reason. An unanswered offer expires after `space.offer_validity_h`; a rejected one is never shown again.
+5. **Evaluate** — six automatic checks in plain words (storage type, area, dates, length, price vs listing, do we need the space — re-checked with the latest forecast). **Accept**, **Reject** (reason) or **Counter-offer** (area, dates, price; the company answers after a seeded delay and, if it accepts, the rental is signed automatically).
+6. **Lease** — the area is held from the start date to the end date and then returns to vacant (and a new window is evaluated). Rent accrues each day: `area × price per m² per month ÷ space.days_per_month`, shown in the Space KPIs and kept apart from the purchasing budget.
+
+**Priority rules** (settings): (1) a signed lease beats a new purchase (`space.rule_lease_beats_purchase`); (2) an approved purchase order beats an unaccepted listing or offer; (3) pending purchase suggestions never block a listing but warn (`space.rule_pending_blocks_listing`, off by default). The company's own need starts at the PO's **arrival** date, not the approval date.
+
+| case | behaviour |
+|---|---|
+| a. PO approved, then the same space is listed | the forecast already contains approved and in-transit POs: the window shrinks or disappears, the refusal names the order and the date. A pending suggestion shows a warning on the window and in the listing form |
+| b. listing published, then a PO that needs the space | conflict card in Space + alert in **both** flows (overlap dates, the order): shrink to what fits, pause, withdraw, reduce the order, use overflow. The Purchasing card of a draft warns *before* approving |
+| c. offer waiting when such a PO is approved | re-evaluated automatically: flagged "we now need this space", **Accept disabled**, a counter-offer with the area / dates that still work is prefilled |
+| d. lease signed, then a PO needs that space | the replenishment room check treats leased area as unavailable (from lease start to end): the order is staged / smaller and an alert in both flows lists the options. A lease is never cancelled automatically |
+| e. same-hour collision | both actions validate inside one database transaction: the second is refused in plain words; for a PO the message gives the largest quantity that still fits |
+| f. lease ends before the PO arrives | no conflict (compatible) |
+
+Every conflict is an event (`SPACE_CONFLICT` / `OFFER_BLOCKED`, flow *both*) and appears in the impact log of the order and of the listing.
+
+**Data and settings.** New tables: `space_forecasts`, `space_listings`, `space_offers`, `space_leases`, `space_decisions` (the old `leases` table and the space recommendations of the matching agent are gone; the
+five requests of `space_requests.csv` are now the tenant pool and stay invisible until a listing exists). `events`, `alerts` carry a `flow` (`purchasing` / `space` / `both`). All thresholds are settings (`space.*`); an older database is upgraded on first start (missing settings are added, the database is re-seeded when the tables are missing).
+**The prices (suggested 4 OMR per m² per month, market band, bids) and the arrival / acceptance model are synthetic assumptions — the CSV has no prices.** The UI says so next to every price.
+
+**Day-0 differences** (`docs/baseline.json`, explained in `docs/space-flow/README.md`): stock, budget, forecasts, replenishment plan and alerts are unchanged, and the physical empty space is still **1,400 m² (Z1 500, Z5 900)**. What changed: the five space proposals are gone; instead the baseline records the *forecast windows* (potentially listable space, e.g. Z1 770 m² from 4 Nov, Z5 790 m² from 27 Oct) and proves that no listing, offer or lease exists on day 0.
 
 ## Settings
 
 Every threshold, rate, schedule and profile lives in the `settings` table (seeded from `config/defaults.json`, shown and editable in the **Settings** screen). Business data
-(items, zones, suppliers, requests, budget) comes only from the CSV tables; UI text and message templates come from `locales/en.json` and `locales/ar.json`, generated by `python scripts/locales_messages.py && python scripts/locales_ui.py && python scripts/locales_wording.py` (the last script holds the plain-language wording and wins). Messages are stored as `{key, vars}` and rendered in the chosen language, so numerals, units and names follow the language toggle. `npm test` fails if a text is typed in a component, a key is missing in one language, or an internal term appears in the English texts.
+(items, zones, suppliers, requests, budget) comes only from the CSV tables; UI text and message templates come from `locales/en.json` and `locales/ar.json`, generated by `npm run locales` (`locales_messages.py`, `locales_ui.py`, `locales_wording.py`, then `locales_space.py`; the last script holds the plain-language Space wording and wins). Messages are stored as `{key, vars}` and rendered in the chosen language, so numerals, units and names follow the language toggle. `npm test` fails if a text is typed in a component, a key is missing in one language, or an internal term appears in the English texts.
 
 | key | default | unit | description |
 |---|---|---|---|
@@ -157,6 +215,28 @@ Every threshold, rate, schedule and profile lives in the `settings` table (seede
 | `schedule.space_hours` | `[8]` | hours | Hours at which the space optimisation agent runs (also after stock-heavy events). |
 | `log.keep_agent_runs` | `400` | rows | Older agent_runs rows are pruned. |
 | `ui.feed_page_size` | `60` | rows | Rows per page in the live feed and logs ('load more'). |
+| `space.min_block_m2` | `100` | m2 | Smallest block of space worth listing. |
+| `space.min_lease_days` | `14` | days | Shortest period worth listing or renting. |
+| `space.area_step_m2` | `10` | m2 | Listed areas are rounded down to this step. |
+| `space.max_layers` | `2` | int | How many stacked windows (different areas) are searched per zone. |
+| `space.confidence_high_days` | `30` | days | Forecast confidence is High when the window ends within this many days. |
+| `space.confidence_medium_days` | `60` | days | Forecast confidence is Medium up to this many days; later is Low. |
+| `space.reeval_days` | `14` | days | Default time before a space kept vacant is looked at again. |
+| `space.reopen_growth_pct` | `25` | pct | A vacant space is offered for decision again early when the free area grows by this much. |
+| `space.price_suggested` | `4` | OMR | Suggested rent in OMR per m² per month (synthetic assumption: the data has no prices). |
+| `space.default_listing_months` | `6` | int | Suggested length of a listing in months when the free window has no known end. |
+| `space.price_market` | `4` | OMR | Market rent in OMR per m² per month used to simulate demand (synthetic assumption). |
+| `space.price_band_pct` | `20` | pct | Rent up to this much above the market price does not reduce offers. |
+| `space.price_sensitivity` | `2` | x | How fast offers disappear when the rent is above the band, and how fast they come when it is below the market. |
+| `space.offer_base_prob` | `0.85` | ratio | Chance that a matching company sends an offer at a market price. |
+| `space.offer_delay_min_h` | `24` | h | Earliest an offer arrives after a listing is published. |
+| `space.offer_delay_max_h` | `96` | h | Latest an offer arrives after a listing is published. |
+| `space.offer_fit_prob` | `0.5` | ratio | Chance that a company adapts its area and dates to the listing. |
+| `space.offer_bid_spread_pct` | `10` | pct | Companies bid within this much around the market price (never above the listing price). |
+| `space.counter_delay_min_h` | `12` | h | Fastest answer of a company to a counter-offer. |
+| `space.counter_delay_max_h` | `48` | h | Slowest answer of a company to a counter-offer. |
+| `space.counter_accept_prob` | `0.7` | ratio | Chance that a company accepts a fair counter-offer. |
+| `space.days_per_month` | `30` | days | Days in a rental month for income per day. |
 
 ## Assumptions
 
@@ -166,8 +246,9 @@ Every threshold, rate, schedule and profile lives in the `settings` table (seede
 4. The agent schedule hours are settings; "stock-out within N days" texts are given in hours.
 5. A supplier-message decision has **no simulated effect** (replies are not simulated) — this is stated explicitly in the impact log.
 6. Seasonality, demand events, alternatives, priority categories etc. are configuration (`config/defaults.json`), not code; item ids appear there because they are business configuration of the demo company.
-7. A lease starts at `max(needed_from, decision day)` and lasts the requested months (calendar months); area is held from the start date, not at approval.
+7. A lease starts at the start date of the accepted offer and ends at its end date; area is held from the start date, not at acceptance. Rent accrues per simulated day: `area × price ÷ space.days_per_month`.
 8. Emergency POs use `po.emergency_lead_factor` × lead time (min. 1 day) and a `po.emergency_premium`; exceeding the budget is allowed but flagged ("over budget").
-9. Receiving is limited by physical room (capacity − fixed − stock − active leases); the reserved buffer protects *rentable* space only. The data's `space_m2_per_unit` makes some zones fill quickly, so large POs arrive partially.
+9. Receiving is limited by physical room (capacity − fixed − stock − active leases); the reserved buffer protects *rentable* space only. The Space Forecast counts the buffer as company need, so listings keep it free. The data's `space_m2_per_unit` makes some zones fill quickly, so large POs arrive partially.
 10. Unit quantities are integers; manual adjustments are signed integers.
 11. Technical constants (not business numbers) remain in code: epsilon tolerances, the 0.8 factor of the "too soon" tick gate, the 400-day cap in the usable-stock horizon.
+12. **Space flow assumptions** — (a) prices, market band, bid spread, arrival delay (24–96 h), arrival probability, counter-offer delay (12–48 h) and acceptance probability are synthetic settings; everything is seeded, so the same seed gives the same offers at the same hours. (b) The company's need per day is the peak of the day: stock moved by the demand forecast, plus POs on their arrival date; goods that do not fit at home spill into the overflow zone as receiving does. (c) A window that only becomes free in the future starts `space.start_buffer_days` later than the forecast says; a listing is flagged as squeezed only when it is short by more than `space.conflict_tolerance_pct` of its area (forecast noise is not a conflict). (d) Tenant requests of the CSV are offers waiting to happen: a company that is leased stops offering; its other open offers are closed. (e) Undo is available for a listing nobody answered, a vacancy decision, a rejected offer and a lease that has not started; pausing / withdrawing is not undoable (resume exists). (f) The Space Forecast may read purchasing outputs (POs, drafts, stock); purchasing reads only lease occupancy. (g) Rule 2 (an approved PO beats an unaccepted listing or offer) is fixed in code; rules 1 and 3 are settings.

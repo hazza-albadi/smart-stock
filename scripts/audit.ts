@@ -9,6 +9,8 @@ import { seedDatabase } from "../lib/seed";
 import { runAll } from "../lib/agents/coordinator";
 import { tick } from "../lib/sim";
 import { decide, manualMovement, createManualPo, createSpaceRequest } from "../lib/decisions";
+import { listWindow, offerAction, keepWindowVacant, listingAction } from "../lib/space/actions";
+import { snapshot } from "../lib/snapshot";
 import { hourlyInvariants, dailyInvariants } from "../lib/audit";
 import { readDay0State } from "../lib/baselineState";
 import { loadSettings } from "../lib/settings";
@@ -36,15 +38,31 @@ function scriptedActions(tick_: number) {
   const safe = (fn: () => unknown) => { try { fn(); } catch { /* an action may legitimately be refused (e.g. space gone) */ } };
   if (hour !== 9) return;
   if (day === 1) { const p = pending("PO"); if (p[0]) safe(() => decide(p[0].id, "APPROVED")); if (p[1]) safe(() => decide(p[1].id, "REJECTED")); }
-  if (day === 2) { const s = pending("SPACE"); if (s[0]) safe(() => decide(s[0].id, "APPROVED")); if (s[1]) safe(() => decide(s[1].id, "REJECTED")); const m = pending("SUPPLIER_MSG"); if (m[0]) safe(() => decide(m[0].id, "APPROVED")); }
+  if (day === 2) { const m = pending("SUPPLIER_MSG"); if (m[0]) safe(() => decide(m[0].id, "APPROVED")); }
+  spaceActions(day);
   if (day === 3) { safe(() => manualMovement({ item, kind: "receipt", qty: 5, reason: "audit receipt" })); safe(() => manualMovement({ item, kind: "adjust", qty: -2, reason: "audit adjustment" })); }
   if (day === 4) { safe(() => createManualPo(item, 10, true)); safe(() => createSpaceRequest({ company: "Audit Co", type: loadSettings().s("space.rentable_request_type"), area: 120, months: 2, from: addDays(String((d.prepare(`SELECT sim_date s FROM sim_state`).get() as any).s), 5) })); }
-  if (day === 6) { const s = pending("SPACE"); for (const r of s.slice(0, 2)) safe(() => decide(r.id, "APPROVED")); const p = pending("PO"); if (p[0]) safe(() => decide(p[0].id, "APPROVED")); }
+  if (day === 6) { const p = pending("PO"); if (p[0]) safe(() => decide(p[0].id, "APPROVED")); }
+}
+
+/** Scripted space decisions: keep one window vacant, list another, answer offers (accept / reject / counter), pause and withdraw. */
+function spaceActions(day: number) {
+  const safe = (fn: () => unknown) => { try { fn(); } catch { /* refused for a good reason (space needed, offer expired ...) */ } };
+  const sp = snapshot().space;
+  if (day === 1) { const w = sp.windows.filter((x) => x.state === "NEW"); if (w[0]) safe(() => keepWindowVacant({ zone_id: w[0].zone_id, area: w[0].area, start_date: w[0].start, end_date: w[0].end, reason: "audit" })); if (w[1]) safe(() => listWindow({ zone_id: w[1].zone_id, area: w[1].area, start_date: w[1].start, end_date: w[1].end, price: sp.settings.price_suggested, publish: true })); }
+  if (day === 3) { const w = sp.windows.filter((x) => x.state === "NEW" && x.area >= sp.settings.min_block); if (w[0]) safe(() => listWindow({ zone_id: w[0].zone_id, area: Math.min(w[0].area, 200), start_date: w[0].start, end_date: w[0].end, price: sp.settings.price_suggested * 1.8, publish: true })); }
+  const pend = sp.offers.filter((o) => o.status === "PENDING");
+  if (day >= 4 && day % 3 === 1 && pend[0]) { const o = pend[0]; if (o.eval?.can_accept) safe(() => offerAction(o.id, "accept")); else if (o.eval?.suggest) safe(() => offerAction(o.id, "counter", { terms: { area: o.eval!.suggest!.area, start_date: o.eval!.suggest!.start, end_date: o.eval!.suggest!.end, price: o.eval!.suggest!.price } })); else safe(() => offerAction(o.id, "reject", { reason: "area" })); }
+  if (day >= 4 && day % 3 === 2 && pend[1]) safe(() => offerAction(pend[1].id, "reject", { reason: "price" }));
+  if (day === 20) { const l = sp.listings.find((x) => x.status === "PUBLISHED"); if (l) safe(() => listingAction(l.id, "pause")); }
+  if (day === 22) { const l = sp.listings.find((x) => x.status === "PAUSED"); if (l) safe(() => listingAction(l.id, "withdraw")); }
 }
 
 function fingerprint(): string {
   const rows = db().prepare(`SELECT date, tick, item_id, movement_type, quantity, reference FROM stock_movements WHERE sim=1 ORDER BY seq`).all();
-  return crypto.createHash("md5").update(JSON.stringify(rows)).digest("hex");
+  const sp = db().prepare(`SELECT id, status, area, start_date, end_date, price, income FROM space_leases ORDER BY id`).all();
+  const of = db().prepare(`SELECT id, company, status, area, price, arrived_tick FROM space_offers ORDER BY id`).all();
+  return crypto.createHash("md5").update(JSON.stringify([rows, sp, of])).digest("hex");
 }
 
 function runSeed(seed: number, label: string) {

@@ -15,7 +15,7 @@ const DecisionCard = memo(function DecisionCard({ rec, ignoreMsg, postponeHours 
   const [more, setMore] = useState(false);
   const p = rec.payload;
   let title = "", why = "", after = "", ignore = "", primary = "", reject = T("dc.reject"), kindLabel = T(`kind.${rec.kind}`);
-  let split = false;
+  const warn = useSnap((s) => s.space.po_warnings.find((w) => rec.kind === "PO" && w.item_id === rec.item_id));
   if (rec.kind === "PO") {
     title = R({ k: "dc.po.title", v: { qty: p.qty, unit: p.unit, item: rec.item_id } });
     why = R(p.reason);
@@ -28,29 +28,18 @@ const DecisionCard = memo(function DecisionCard({ rec, ignoreMsg, postponeHours 
     after = R({ k: "dc.msg.after" });
     ignore = ignoreMsg ? R(ignoreMsg) : R({ k: "dc.msg.ignore" });
     primary = R({ k: "dc.msg.approve" });
-  } else {
-    const zone = p.allocations?.[0]?.zone_id ?? "";
-    title = R({ k: "dc.space.title", v: { company: p.company, area: p.requested_m2, months: p.months } });
-    why = R([...(p.reason ?? []), ...(p.note ?? [])]);
-    ignore = R({ k: "dc.space.ignore" });
-    reject = T("dc.space.reject");
-    if (p.decision === "REJECT") { after = R({ k: "dc.space.after_decline" }); primary = R({ k: "dc.space.decline" }); }
-    else {
-      after = R({ k: "dc.space.after", v: { area: p.area_m2, zone, from: p.needed_from, months: p.months } });
-      primary = R({ k: p.decision === "PARTIAL" ? "dc.space.offer" : "dc.space.approve", v: { area: p.area_m2, zone } });
-      split = p.decision === "PARTIAL" && (p.split ?? []).reduce((s: number, a: { area: number }) => s + a.area, 0) > p.area_m2 + 1e-6;
-    }
   }
   return (
     <li className={`rounded-xl border bg-surface p-3.5 ${rec.overdue ? "border-high" : "border-line"}`}>
       <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-        <Pill tone={rec.kind === "PO" ? "Info" : rec.kind === "SPACE" ? "OK" : "Monitor"} icon={false}>{kindLabel}</Pill>
+        <Pill tone={rec.kind === "PO" ? "Info" : "Monitor"} icon={false}>{kindLabel}</Pill>
         {rec.source === "manual" && <Pill tone="user" icon={false}>{T("you")}</Pill>}
         {rec.reopen_count > 0 && <Pill tone="High">{T("dc.back")}</Pill>}
         {rec.overdue && <Pill tone="Critical">{T("dc.overdue")}</Pill>}
         <span className="text-xs text-muted">{T("dc.waiting")} <span className="num font-semibold text-ink">{DUR(rec.age_hours)}</span> · {T("since")} <span className="num">{DT(rec.created_tick)}</span></span>
       </div>
       <h3 className="text-base font-bold leading-snug">{title}</h3>
+      {warn && <p className="mt-1.5 rounded-md bg-mon-soft px-2 py-1 text-sm"><strong className="text-mon">▲ {T("dc.po.space_warn_h")}: </strong>{R({ k: "dc.po.space_warn", v: { short: warn.short, area: warn.rest, zone: warn.zone_id, date: warn.arrival } })}</p>}
       <dl className="mt-1.5 space-y-1 text-sm">
         <div><dt className="inline font-semibold">{T("dc.why")}: </dt><dd className="inline text-muted">{why}</dd></div>
         <div><dt className="inline font-semibold">{T("dc.after")}: </dt><dd className="inline text-muted">{after}</dd></div>
@@ -58,7 +47,6 @@ const DecisionCard = memo(function DecisionCard({ rec, ignoreMsg, postponeHours 
       </dl>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Btn tone="ok" size="lg" disabled={busy} className="grow sm:grow-0" onClick={() => decide(rec.id, "APPROVED")}>{primary}</Btn>
-        {split && <Btn disabled={busy} onClick={() => decide(rec.id, "APPROVED", { variant: "split" })}>{T("dc.space.split")}</Btn>}
         <Btn tone="bad" disabled={busy} onClick={() => decide(rec.id, "REJECTED")}>{reject}</Btn>
         <Btn disabled={busy} onClick={() => postpone(rec.id)} title={T("dc.postpone_hint")}>{R({ k: "dc.postpone", v: { hours: postponeHours } })}</Btn>
         {(rec.kind === "PO" || rec.kind === "SUPPLIER_MSG") && (
@@ -94,7 +82,7 @@ export default function DecisionCenter() {
     <section id="decisions" className="card scroll-mt-24" aria-label={T("dc.title")}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
         <div>
-          <h2 className="flex items-center gap-2 text-lg font-bold">{T("dc.title")} <span className={`num rounded-full px-2.5 py-0.5 text-sm ${open.length ? "bg-high text-white" : "bg-ok-soft text-ok"}`}>{N(open.length)}</span></h2>
+          <h2 className="flex items-center gap-2 text-lg font-bold">{T("dc.title")} <span className={`num rounded-full px-2.5 py-0.5 text-sm ${open.length ? "bg-high text-on-accent" : "bg-ok-soft text-ok"}`}>{N(open.length)}</span></h2>
           <p className="text-xs text-muted">{open.length ? `${T("dc.oldest")}: ${DUR(oldest)} · ${T("dc.sub")}` : T("dc.sub")}</p>
         </div>
         {postponed.length > 0 && (

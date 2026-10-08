@@ -8,6 +8,7 @@ import { loadSettings, setSetting, type Settings } from "./settings";
 import { addMovement, issueFefo, receiveGoods, totalOnHand } from "./stock";
 import { runAll, runScheduled } from "./agents/coordinator";
 import { seedDatabase } from "./seed";
+import { spaceHour } from "./space/market";
 
 /** Plans the demand of one day: daily quantity per item (seeded), then split over 24 hours. Stored in demand_log. */
 function ensureDemandPlan(cfg: Settings, day: number, date: string, items: Item[]) {
@@ -25,20 +26,6 @@ function ensureDemandPlan(cfg: Settings, day: number, date: string, items: Item[
   }
 }
 
-/** Leases start (area now held) or end (area returns) at the day boundary. */
-function leaseLifecycle(date: string) {
-  const d = db();
-  const tick = getSim().tick;
-  for (const l of d.prepare(`SELECT * FROM leases WHERE status='RESERVED' AND start_date<=?`).all(date) as { id: number; request_id: string; company: string; zone_id: string; area: number; end_date: string }[]) {
-    d.prepare(`UPDATE leases SET status='ACTIVE' WHERE id=?`).run(l.id);
-    logEvent("LEASE_START", null, M("ev.lease_start", { req: l.request_id, company: l.company, area: l.area, zone: l.zone_id, end: l.end_date }), "info", { ref: l.request_id });
-  }
-  for (const l of d.prepare(`SELECT * FROM leases WHERE status IN ('ACTIVE','RESERVED') AND end_date<=?`).all(date) as { id: number; request_id: string; company: string; zone_id: string; area: number }[]) {
-    d.prepare(`UPDATE leases SET status='ENDED', ended_tick=? WHERE id=?`).run(tick, l.id);
-    logEvent("LEASE_END", null, M("ev.lease_end", { req: l.request_id, company: l.company, area: l.area, zone: l.zone_id }), "info", { ref: l.request_id });
-  }
-}
-
 function processHour(cfg: Settings, tick: number, items: Item[]) {
   const d = db();
   const s = getSim();
@@ -46,7 +33,7 @@ function processHour(cfg: Settings, tick: number, items: Item[]) {
   const itemOf = new Map(items.map((i) => [i.item_id, i]));
   const lastUsable = cfg.n("expiry.last_usable_hour");
 
-  if (hour === 0) leaseLifecycle(date);
+  spaceHour(cfg, tick); // leases start / end, rent accrues, offers expire / arrive, counter-offers are answered
 
   // 1) Lots past their expiry hour are written off (everything left in the lot).
   const expired = d.prepare(`SELECT * FROM current_stock WHERE expiry_date IS NOT NULL AND quantity_on_hand>0 AND (expiry_date<? OR (expiry_date=? AND ?>?))`)

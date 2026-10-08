@@ -26,6 +26,6 @@ export function loadSettings(): Settings {
 export function setSetting(key: string, value: unknown) {
   const cur = db().prepare(`SELECT unit FROM settings WHERE key=?`).get(key) as { unit: string } | undefined;
   if (!cur) throw new Error(`unknown setting: ${key}`);
-  if (["int", "ms", "h", "days", "weeks", "ratio", "x", "units/wk", "rows", "weight"].includes(cur.unit) && !Number.isFinite(Number(value))) throw new Error("number expected");
+  if (["int", "ms", "h", "days", "weeks", "ratio", "x", "units/wk", "rows", "weight", "pct", "m2", "OMR"].includes(cur.unit) && !Number.isFinite(Number(value))) throw new Error("number expected");
   db().prepare(`UPDATE settings SET value=? WHERE key=?`).run(JSON.stringify(value), key);
 }

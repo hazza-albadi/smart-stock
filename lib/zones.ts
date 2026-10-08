@@ -1,11 +1,15 @@
-import { db } from "../db";
-import { zoneFigures } from "../calc";
-import { getSim, logRun, M, type AgentResult } from "../core";
+import { db } from "./db";
+import { zoneFigures } from "./calc";
+import { getSim, logRun, M, type AgentResult } from "./core";
 
 export interface Lease { id: number; request_id: string; company: string; zone_id: string; area: number; start_date: string; end_date: string; status: string }
 
-/** Leases that hold area: reserved (approved, not started) and active. */
-export const holdingLeases = () => db().prepare(`SELECT * FROM leases WHERE status IN ('RESERVED','ACTIVE') ORDER BY start_date, id`).all() as Lease[];
+/** Leases that hold area: signed but not started (RESERVED) and running (ACTIVE). Zone occupancy data shared by both flows. */
+export const holdingLeases = () => db().prepare(`SELECT id, request_id, company, zone_id, area, start_date, end_date, status FROM space_leases WHERE status IN ('RESERVED','ACTIVE') ORDER BY start_date, id`).all() as Lease[];
+
+/** Area of a zone held by tenants on a given date (signed leases: start <= date < end). The only lease data purchasing planning reads. */
+export const leasedOn = (zone: string, date: string): number =>
+  (db().prepare(`SELECT COALESCE(SUM(area),0) a FROM space_leases WHERE zone_id=? AND status IN ('RESERVED','ACTIVE') AND start_date<=? AND ?<end_date`).get(zone, date, date) as { a: number }).a;
 
 export interface ZoneRow {
   zone_id: string; zone_name: string; storage_type: string; capacity: number; fixed: number; stock_used: number; used: number; reserved: number;
@@ -21,7 +25,7 @@ export function computeZones(): ZoneRow[] {
   // used = fixed + sum(quantity_on_hand x space per unit) of the lots held in the zone (the item's zone, or the overflow zone)
   const stockBy = new Map((d.prepare(`SELECT c.zone_id z, SUM(c.quantity_on_hand*i.space_m2_per_unit) m2 FROM current_stock c
     JOIN items i ON i.item_id=c.item_id GROUP BY c.zone_id`).all() as { z: string; m2: number }[]).map((s) => [s.z, s.m2]));
-  const activeBy = new Map((d.prepare(`SELECT zone_id z, SUM(area) a FROM leases WHERE status='ACTIVE' GROUP BY zone_id`).all() as { z: string; a: number }[]).map((a) => [a.z, a.a]));
+  const activeBy = new Map((d.prepare(`SELECT zone_id z, SUM(area) a FROM space_leases WHERE status='ACTIVE' GROUP BY zone_id`).all() as { z: string; a: number }[]).map((a) => [a.z, a.a]));
   return zones.map((z) => {
     const f = zoneFigures({
       capacity: z.capacity_m2, fixed: z.fixed_occupied_m2_aisles_equipment, stockUsed: stockBy.get(z.zone_id) ?? 0,
@@ -47,7 +51,7 @@ export function spaceAgent(group: string, trigger: string): AgentResult {
     for (const z of rows) st.run(z.zone_id, z.capacity, z.fixed, z.stock_used, z.used, z.reserved, z.rent_allowed, z.free, z.rentable, z.allocated, z.over_capacity, sim.tick);
   })();
   const rentable = rows.reduce((a, z) => a + z.net, 0);
-  const reserved = (d.prepare(`SELECT COALESCE(SUM(area),0) a FROM leases WHERE status='RESERVED'`).get() as { a: number }).a;
+  const reserved = (d.prepare(`SELECT COALESCE(SUM(area),0) a FROM space_leases WHERE status='RESERVED'`).get() as { a: number }).a;
   const res: AgentResult = {
     msg: M("run.space", { rentable, detail: rows.filter((z) => z.rent_allowed).map((z) => `${z.zone_id} ${Math.round(z.net)}`).join(" + "),
       allocated: rows.reduce((a, z) => a + z.allocated, 0), reserved, over: rows.reduce((a, z) => a + z.over_capacity, 0) }),

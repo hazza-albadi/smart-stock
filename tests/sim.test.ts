@@ -111,25 +111,6 @@ test("pending recommendations age and escalate to an overdue alert", () => {
   assert.ok(s.alerts.some((a) => a.kind === "DECISION_OVERDUE"));
 });
 
-test("space: approving reserves area from needed_from, reduces rentable then, returns it when the lease ends", () => {
-  fresh();
-  const rec = q(`SELECT id, request_id, payload FROM recommendations WHERE kind='SPACE' AND status='PENDING' AND json_extract(payload,'$.decision')='APPROVE' ORDER BY id`)[0];
-  const before = snapshot().kpi.rentable_m2;
-  decide(rec.id, "APPROVED");
-  const lease = q(`SELECT * FROM leases WHERE request_id=?`, rec.request_id)[0];
-  assert.ok(lease.start_date >= getSim().sim_date);
-  assert.equal(snapshot().kpi.rentable_m2, before, "rentable now unchanged until the lease starts");
-  assert.equal(snapshot().kpi.reserved_m2, lease.area);
-  // other requests are re-evaluated against what remains
-  const others = q(`SELECT payload FROM recommendations WHERE kind='SPACE' AND status='PENDING'`).map((r) => JSON.parse(r.payload));
-  assert.ok(others.length > 0);
-  const days = (Date.parse(lease.start_date + "T00:00:00Z") - Date.parse(getSim().sim_date + "T00:00:00Z")) / 86400000;
-  advance({ hours: days * 24 + 1 });
-  assert.equal(q(`SELECT status FROM leases WHERE id=?`, lease.id)[0].status, "ACTIVE");
-  assert.ok(q(`SELECT 1 FROM events WHERE type='LEASE_START' AND ref=?`, rec.request_id).length === 1);
-  assert.ok(snapshot().zones.find((z) => z.zone_id === lease.zone_id)!.allocated >= lease.area);
-});
-
 test("manual actions are audited and go through the same agents", () => {
   fresh();
   const item = q(`SELECT item_id FROM items ORDER BY item_id LIMIT 1 OFFSET 4`)[0].item_id;

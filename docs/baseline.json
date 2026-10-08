@@ -546,53 +546,32 @@
         "severity": "Critical"
       }
     ],
-    "space_proposals": [
+    "space_windows": [
       {
-        "request_id": "REQ-01",
-        "decision": "APPROVE",
-        "area_m2": 600,
-        "allocations": [
-          {
-            "zone_id": "Z5",
-            "area": 600
-          }
-        ]
+        "zone_id": "Z1",
+        "start_date": "2026-11-04",
+        "end_date": "2027-01-03",
+        "area": 770,
+        "confidence": "low",
+        "state": "NEW",
+        "to_horizon": 1
       },
       {
-        "request_id": "REQ-02",
-        "decision": "REJECT",
-        "area_m2": 0,
-        "allocations": []
-      },
-      {
-        "request_id": "REQ-03",
-        "decision": "REJECT",
-        "area_m2": 0,
-        "allocations": []
-      },
-      {
-        "request_id": "REQ-04",
-        "decision": "PARTIAL",
-        "area_m2": 900,
-        "allocations": [
-          {
-            "zone_id": "Z5",
-            "area": 900
-          }
-        ]
-      },
-      {
-        "request_id": "REQ-05",
-        "decision": "APPROVE",
-        "area_m2": 450,
-        "allocations": [
-          {
-            "zone_id": "Z1",
-            "area": 450
-          }
-        ]
+        "zone_id": "Z5",
+        "start_date": "2026-10-27",
+        "end_date": "2027-01-03",
+        "area": 790,
+        "confidence": "low",
+        "state": "NEW",
+        "to_horizon": 1
       }
     ],
+    "space_flow": {
+      "listings": 0,
+      "offers": 0,
+      "leases": 0,
+      "pool": 5
+    },
     "recommendations": [
       {
         "kind": "SUPPLIER_MSG",
@@ -627,31 +606,6 @@
       {
         "kind": "PO",
         "key": "PO:SKU-016",
-        "status": "PENDING"
-      },
-      {
-        "kind": "SPACE",
-        "key": "SPACE:REQ-01",
-        "status": "PENDING"
-      },
-      {
-        "kind": "SPACE",
-        "key": "SPACE:REQ-02",
-        "status": "PENDING"
-      },
-      {
-        "kind": "SPACE",
-        "key": "SPACE:REQ-03",
-        "status": "PENDING"
-      },
-      {
-        "kind": "SPACE",
-        "key": "SPACE:REQ-04",
-        "status": "PENDING"
-      },
-      {
-        "kind": "SPACE",
-        "key": "SPACE:REQ-05",
         "status": "PENDING"
       }
     ]

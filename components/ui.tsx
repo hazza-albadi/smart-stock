@@ -34,7 +34,7 @@ export function Btn({ children, onClick, tone = "ghost", disabled, className = "
   type?: "button" | "submit"; ariaLabel?: string; size?: "md" | "lg";
 }) {
   const t = { primary: "bg-brand text-brand-ink hover:opacity-90", ghost: "bg-surface2 text-ink border border-line hover:border-brand",
-    ok: "bg-ok text-white hover:opacity-90", bad: "bg-surface text-crit border border-crit hover:bg-crit-soft" }[tone];
+    ok: "bg-ok text-on-accent hover:opacity-90", bad: "bg-surface text-crit border border-crit hover:bg-crit-soft" }[tone];
   return (
     <button type={type} title={title} aria-label={ariaLabel} disabled={disabled} onClick={onClick}
       className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${size === "lg" ? "min-h-12" : "min-h-10"} ${t} ${className}`}>

@@ -6,8 +6,9 @@ export const metadata: Metadata = {
   description: "Inventory and warehouse-space assistant (live simulation MVP)",
 };
 
-const initScript = `try{var t=localStorage.getItem('ss-theme');if(!t)t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
-document.documentElement.setAttribute('data-theme',t);var l=localStorage.getItem('ss-lang')||'ar';
+const initScript = `try{var t=localStorage.getItem('ss-theme');if(t!=='dark'&&t!=='light')t='light';
+document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','light');}
+try{var l=localStorage.getItem('ss-lang')||'ar';
 document.documentElement.lang=l;document.documentElement.dir=l==='ar'?'rtl':'ltr';}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

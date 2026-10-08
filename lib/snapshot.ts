@@ -6,13 +6,14 @@ import { loadLive } from "./live";
 import { statusOf, ex, demandOver, coverHours, type Explain, type Status } from "./calc";
 import { budgetInfo } from "./agents/replenishment";
 import { AGENT_ORDER } from "./agents/coordinator";
-import { computeZones } from "./agents/space";
+import { computeZones } from "./zones";
+import { spaceSnapshot } from "./space/snapshot";
 import { llmEnabled } from "./llm";
 
 export type { Status };
 export interface Rec {
   snoozed: boolean;
-  id: number; key: string; kind: "PO" | "SUPPLIER_MSG" | "SPACE"; item_id: string | null; request_id: string | null;
+  id: number; key: string; kind: "PO" | "SUPPLIER_MSG"; item_id: string | null; request_id: string | null;
   status: "PENDING" | "APPROVED" | "REJECTED"; payload: any; created_tick: number; decided_tick: number | null; source: string;
   reopen_count: number; age_hours: number; overdue: boolean;
 }
@@ -84,24 +85,22 @@ export function snapshot() {
       ], p.position <= p.rop ? "below" : "above") }));
 
   const zones = computeZones();
-  const leases = all(`SELECT * FROM leases ORDER BY status='ENDED', start_date, id`);
-  const requests = all(`SELECT * FROM space_requests ORDER BY created_tick, request_id`);
   const runs = all(`SELECT * FROM agent_runs ORDER BY id DESC LIMIT 120`).map((r) => ({ ...r, summary: JSON.parse(r.summary) }));
-  const events = all(`SELECT * FROM events ORDER BY id DESC LIMIT ?`, cfg.n("ui.feed_page_size")).map((e) => ({ ...e, msg: JSON.parse(e.msg), meta: e.meta ? JSON.parse(e.meta) : null }));
+  const events = all(`SELECT * FROM events WHERE id IN (SELECT id FROM events WHERE flow IN ('purchasing','both') ORDER BY id DESC LIMIT ?) OR id IN (SELECT id FROM events WHERE flow IN ('space','both') ORDER BY id DESC LIMIT ?) ORDER BY id DESC`, cfg.n("ui.feed_page_size"), cfg.n("ui.feed_page_size")).map((e) => ({ ...e, msg: JSON.parse(e.msg), meta: e.meta ? JSON.parse(e.meta) : null }));
   const recent = all(`SELECT m.seq, m.date, m.tick, m.item_id, i.unit, m.movement_type, m.quantity, m.reference, m.balance_after, m.lot_id, m.actor
     FROM stock_movements m JOIN items i ON i.item_id=m.item_id WHERE m.sim=1 ORDER BY m.seq DESC LIMIT ?`, cfg.n("ui.feed_page_size"));
   const totals = all(`SELECT COUNT(*) n, COALESCE(SUM(CASE WHEN movement_type='IN' THEN quantity END),0) qin, COALESCE(SUM(CASE WHEN movement_type='OUT' THEN quantity END),0) qout
     FROM stock_movements WHERE sim=1`)[0];
-  const health = all(`SELECT * FROM audit_results ORDER BY id DESC LIMIT 1`)[0] ?? null;
+  const healthRow = all(`SELECT * FROM audit_results ORDER BY id DESC LIMIT 1`)[0];
+  const health = healthRow ? { ...healthRow, by_flow: healthRow.by_flow ? JSON.parse(healthRow.by_flow) : null } : null;
 
   const riskItems = new Set(alerts.filter((a) => (a.severity === "Critical" || a.severity === "High") && a.item_id).map((a) => a.item_id));
   const rentable = zones.reduce((s, z) => s + z.net, 0);
-  const reserved = leases.filter((l) => l.status === "RESERVED").reduce((s, l) => s + l.area, 0);
   const pending = recs.filter((r) => r.status === "PENDING").length;
 
   const kpi = {
     items_at_risk: riskItems.size, budget_remaining: bud.free, budget_after_drafts: bud.free - pendingPo, over_budget: bud.overBudget,
-    rentable_m2: rentable, reserved_m2: reserved, pending,
+    rentable_m2: rentable, po_open: (all(`SELECT COUNT(*) n FROM purchase_orders_open WHERE status IN ('OPEN','DELAYED_BY_SUPPLIER')`)[0]?.n as number) ?? 0, pending,
   };
   const kpiExplain: Record<string, Explain> = {
     risk: ex("ex.kpi.risk", [{ label: "ex.in.alerts_ch", value: alerts.filter((a) => a.severity === "Critical" || a.severity === "High").length, source: "alerts" }], riskItems.size),
@@ -112,6 +111,7 @@ export function snapshot() {
     rentable: ex("ex.kpi.rentable", zones.filter((z) => z.rent_allowed).flatMap((z) => [
       { label: "ex.in.zone_formula", value: `${Math.round(z.capacity)} − ${Math.round(z.used)} − ${Math.round(z.reserved)} − ${Math.round(z.allocated)}`, unit: "m²", source: z.zone_id },
     ]), rentable, "m²"),
+    orders: ex("ex.kpi.orders", [{ label: "ex.in.open_pos", value: (all(`SELECT COUNT(*) n FROM purchase_orders_open WHERE status IN ('OPEN','DELAYED_BY_SUPPLIER')`)[0]?.n as number) ?? 0, source: "purchase_orders_open" }], (all(`SELECT COUNT(*) n FROM purchase_orders_open WHERE status IN ('OPEN','DELAYED_BY_SUPPLIER')`)[0]?.n as number) ?? 0),
     pending: ex("ex.kpi.pending", [{ label: "ex.in.pending_recs", value: pending, source: "recommendations" }], pending),
   };
 
@@ -119,10 +119,10 @@ export function snapshot() {
     sim: {
       tick: sim.tick, date: sim.sim_date, hour: sim.hour, day: sim.day, running: !!sim.running, interval_ms: sim.interval_ms, data_end: sim.data_end,
       auto_pause: cfg.b("sim.auto_pause_critical"), presets: cfg.j<number[]>("sim.interval_presets_ms"), min_interval_ms: cfg.n("sim.min_interval_ms"),
-      max_advance: cfg.n("sim.max_advance_hours"), rentable_type: cfg.s("space.rentable_request_type"), start_date: sim.start_date, postpone_hours: cfg.n("rec.postpone_hours"), undo_seconds: cfg.n("ui.undo_seconds"), seq: g.__sssseq, decided: recs.filter((r) => r.status !== "PENDING").length, page_size: cfg.n("ui.feed_page_size"), utc_offset: cfg.n("sim.utc_offset_hours"),
+      max_advance: cfg.n("sim.max_advance_hours"), rentable_type: cfg.s("space.rentable_request_type"), start_date: sim.start_date, postpone_hours: cfg.n("rec.postpone_hours"), undo_seconds: cfg.n("ui.undo_seconds"), seq: g.__sssseq, decided: recs.filter((r) => r.status !== "PENDING").length + ((all(`SELECT COUNT(*) n FROM space_decisions`)[0]?.n as number) ?? 0), page_size: cfg.n("ui.feed_page_size"), utc_offset: cfg.n("sim.utc_offset_hours"),
     },
     names: Object.fromEntries(items.map((i) => [i.item_id, { name_en: i.name_en, name_ar: i.name_ar, unit: i.unit }])),
-    kpi, kpi_explain: kpiExplain, items, alerts, recs, plan, requests, leases, runs, events, recent_movements: recent, totals, health,
+    kpi, kpi_explain: kpiExplain, items, alerts, recs, plan, space: spaceSnapshot(), runs, events, recent_movements: recent, totals, health,
     budget: { total: bud.total, committed: bud.committed, new_funded: pendingPo, start: bud.start, end: bud.end, over: bud.overBudget,
       explain: ex("ex.budget", [{ label: "ex.in.budget_total", value: bud.total, unit: "OMR" }, { label: "ex.in.committed", value: bud.committed, unit: "OMR" }, { label: "ex.in.drafts", value: pendingPo, unit: "OMR" }], bud.free - pendingPo, "OMR") },
     zones: zones.map((z) => ({ ...z, explain: ex("ex.zone", [

@@ -25,6 +25,11 @@ export interface ForecastRow {
 export type Severity = "Critical" | "High" | "Monitor" | "Info";
 export interface AgentResult { msg: Msg }
 
+/** A refused action; `msg` is shown to the user in their language. */
+export class UserError extends Error {
+  constructor(public msg: Msg) { super(msg.k); }
+}
+
 export function getSim(): SimState {
   const s = db().prepare(`SELECT * FROM sim_state WHERE id=1`).get() as {
     tick: number; start_date: string; history_end: string; data_end: string; running: number; interval_ms: number; last_tick_at: number;
@@ -33,11 +38,11 @@ export function getSim(): SimState {
 }
 export const getItems = () => db().prepare(`SELECT * FROM items ORDER BY item_id`).all() as Item[];
 
-export function logEvent(type: string, itemId: string | null, msg: Msg, severity: string, o: { ref?: string; actor?: string; meta?: unknown } = {}) {
+export function logEvent(type: string, itemId: string | null, msg: Msg, severity: string, o: { ref?: string; actor?: string; meta?: unknown; flow?: "purchasing" | "space" | "both" } = {}) {
   const s = getSim();
-  db().prepare(`INSERT INTO events(tick,ts,sim_date,type,item_id,severity,msg,ref,actor,meta) VALUES(?,?,?,?,?,?,?,?,?,?)`)
+  db().prepare(`INSERT INTO events(tick,ts,sim_date,type,item_id,severity,msg,ref,actor,meta,flow) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
     .run(s.tick, new Date().toISOString(), s.sim_date, type, itemId, severity, JSON.stringify(msg), o.ref ?? null, o.actor ?? "system",
-      o.meta === undefined ? null : JSON.stringify(o.meta));
+      o.meta === undefined ? null : JSON.stringify(o.meta), o.flow ?? "purchasing");
 }
 
 export function logRun(group: string, agent: string, trigger: string, startedAt: string, msg: Msg) {

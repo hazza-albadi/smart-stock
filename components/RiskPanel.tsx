@@ -10,7 +10,7 @@ export function KpiStrip() {
   const cards = [
     { id: "risk", label: T("kpi.risk"), value: N(k.items_at_risk), sub: T("kpi.risk_sub"), tone: k.items_at_risk > 0 ? "text-crit" : "text-ok", go: () => document.getElementById("risks")?.scrollIntoView({ behavior: "smooth" }), e: ex.risk },
     { id: "budget", label: T("kpi.budget"), value: OMR(k.budget_remaining), sub: `${T("kpi.budget_sub")} ${OMR(total)}${k.over_budget ? " · " + T("overBudget") : ""}`, tone: k.over_budget ? "text-crit" : "text-brand", go: () => goTab("plan"), e: ex.budget },
-    { id: "space", label: T("kpi.space"), value: `${N(k.rentable_m2)} ${T("fmt.m2")}`, sub: k.reserved_m2 > 0 ? `${T("kpi.space_reserved")} ${N(k.reserved_m2)} ${T("fmt.m2")}` : T("kpi.space_sub"), tone: "text-brand", go: () => goTab("space"), e: ex.rentable },
+    { id: "orders", label: T("kpi.orders"), value: N(k.po_open), sub: T("kpi.orders_sub"), tone: "text-brand", go: () => goTab("plan"), e: ex.orders },
     { id: "pending", label: T("kpi.pending"), value: N(k.pending), sub: T("kpi.pending_sub"), tone: k.pending > 0 ? "text-high" : "text-ok", go: () => document.getElementById("decisions")?.scrollIntoView({ behavior: "smooth" }), e: ex.pending },
   ];
   return (
@@ -28,7 +28,7 @@ export function KpiStrip() {
   );
 }
 
-const RiskRow = memo(function RiskRow({ a }: { a: any }) {
+export const RiskRow = memo(function RiskRow({ a }: { a: any }) {
   const { T, R, DT } = useApp();
   const [open, setOpen] = useState(false);
   return (
@@ -53,9 +53,10 @@ const RiskRow = memo(function RiskRow({ a }: { a: any }) {
 });
 
 /** What is at risk: the alerts in plain words; details on click. Fixed height. */
-export function RiskList() {
+export function RiskList({ flow = "purchasing" }: { flow?: "purchasing" | "space" }) {
   const { T, N } = useApp();
-  const alerts = useSnap((s) => s.alerts);
+  const all = useSnap((s) => s.alerts);
+  const alerts = useMemo(() => all.filter((a) => a.flow === flow || a.flow === "both"), [all, flow]);
   const rows = useMemo(() => alerts.filter((a) => a.severity !== "Info" && a.kind !== "DECISION_OVERDUE"), [alerts]);
   const info = useMemo(() => alerts.filter((a) => a.severity === "Info"), [alerts]);
   const [showInfo, setShowInfo] = useState(false);
