@@ -31,10 +31,14 @@ Check your computer at any time with:  npm run doctor   (messages in English and
 ----------------------------------
 The database package is better-sqlite3 (a native C++ module). Version 13 ships PREBUILT binaries inside the npm package for:
   Windows x64 / ARM64, macOS Intel / Apple Silicon, Linux x64 / ARM64 (glibc and musl).
-So on a normal machine `npm ci` needs NO compiler. If your Node/OS combination is not covered or the binary does not load
+So on a normal machine `npm ci` needs NO compiler. IMPORTANT: npm 11 would still try to compile the module with node-gyp during install
+(and fail on a computer without Visual Studio / Xcode tools). The project therefore contains a .npmrc file with `ignore-scripts=true`, which makes
+npm use the prebuilt binary. (Tested: without it `npm ci` fails on a clean Windows machine with "find VS ... Desktop development with C++".)
+Do not delete .npmrc. Side effect: npm does not run pre/post scripts, so `npm run dev` calls the doctor itself (see section 6).
+If your Node/OS combination is not covered or the binary does not load
 (error mentions "better-sqlite3", "node-gyp" or "was compiled against a different Node.js version"):
   1) Check Node:           node -v            (must be 22 or newer, then open a NEW terminal)
-  2) Reinstall the module:  npm rebuild better-sqlite3
+  2) Reinstall the module:  npm ci            (or: npm rebuild better-sqlite3 --ignore-scripts=false --build-from-source  to compile it)
   3) Still failing? Install a compiler and Python 3, then run step 2 again:
      Windows : install "Visual Studio Build Tools" with the workload "Desktop development with C++"
                winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
@@ -124,7 +128,7 @@ Or by hand:
   open http://localhost:3000        # macOS      (Linux: xdg-open http://localhost:3000)
 
 The page opens in the LIGHT theme and in Arabic (RTL). Use the language and theme buttons in the top bar; your choice is remembered in the browser.
-`npm run dev` runs `npm run doctor --pre` first (it only stops for problems that would break the app, such as an old Node).
+`npm run dev` runs the doctor first (`node scripts/check-env.mjs --pre`; it only stops for problems that would break the app, such as an old Node).
 Stop the app with Ctrl+C. Data is kept in smartstock.db between runs. If you skip `npm run seed`, the database is created automatically
 on the first page load.
 
