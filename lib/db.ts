@@ -25,7 +25,7 @@ export function useDatabase(file: string) { dbFile = file; }
 const TABLES = ["items", "suppliers", "stock_movements", "current_stock", "stock_opening", "purchase_orders_open", "purchasing_budget",
   "warehouse_zones", "space_requests", "agent_runs", "events", "recommendations", "decisions", "sim_state", "sim_baseline", "forecasts",
   "replenishment_plan", "zone_space", "alerts", "settings", "leases", "demand_log", "audit_results",
-  "space_forecasts", "space_listings", "space_offers", "space_leases", "space_decisions"];
+  "space_forecasts", "space_listings", "space_offers", "space_leases", "space_decisions", "budget_topups"];
 
 export const SCHEMA = TABLES.map((t) => `DROP TABLE IF EXISTS ${t};`).join(" ") + `
 CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, unit TEXT, description TEXT);
@@ -43,11 +43,12 @@ CREATE TABLE stock_opening(lot_id TEXT PRIMARY KEY, item_id TEXT, qty REAL);
 CREATE TABLE purchase_orders_open(po_id TEXT PRIMARY KEY, item_id TEXT, supplier_id TEXT, quantity REAL, order_date TEXT,
   expected_arrival TEXT, status TEXT, source TEXT DEFAULT 'DATA', received_date TEXT, expected_hour INTEGER DEFAULT 0,
   ordered_tick INTEGER, received_tick INTEGER, emergency INTEGER DEFAULT 0, premium REAL DEFAULT 0, rec_key TEXT);
-CREATE TABLE purchasing_budget(period_start TEXT, period_end TEXT, total_purchasing_budget_omr REAL, notes TEXT);
+CREATE TABLE purchasing_budget(id INTEGER PRIMARY KEY AUTOINCREMENT, period_start TEXT, period_end TEXT, total_purchasing_budget_omr REAL, notes TEXT, rollover REAL DEFAULT 0, topup REAL DEFAULT 0, source TEXT DEFAULT 'DATA');
+CREATE TABLE budget_topups(id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER, ts TEXT, period_id INTEGER, amount REAL, po_id TEXT, item_id TEXT, reason TEXT);
 CREATE TABLE warehouse_zones(warehouse_id TEXT, zone_id TEXT PRIMARY KEY, zone_name TEXT, storage_type TEXT, capacity_m2 REAL,
   fixed_occupied_m2_aisles_equipment REAL, reserved_buffer_m2 REAL, rent_allowed TEXT, notes TEXT);
 CREATE TABLE space_requests(request_id TEXT PRIMARY KEY, company TEXT, required_storage_type TEXT, area_needed_m2 REAL,
-  duration_months INTEGER, needed_from TEXT, notes TEXT, source TEXT DEFAULT 'DATA', created_tick INTEGER DEFAULT 0);
+  duration_months INTEGER, needed_from TEXT, notes TEXT, source TEXT DEFAULT 'DATA', created_tick INTEGER DEFAULT 0, price_factor REAL DEFAULT 1);
 
 CREATE TABLE agent_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, run_group TEXT, agent TEXT, tick INTEGER, sim_date TEXT,
   started_at TEXT, finished_at TEXT, summary TEXT, trigger TEXT);
@@ -74,7 +75,7 @@ CREATE TABLE alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, kind 
 CREATE TABLE space_forecasts(id INTEGER PRIMARY KEY AUTOINCREMENT, zone_id TEXT, start_date TEXT, end_date TEXT, area REAL, confidence TEXT,
   inputs TEXT, state TEXT, held_until TEXT, to_horizon INTEGER DEFAULT 0, pending_area REAL DEFAULT 0, pending_note TEXT, updated_tick INTEGER, first_tick INTEGER);
 CREATE TABLE space_listings(id INTEGER PRIMARY KEY AUTOINCREMENT, zone_id TEXT, area REAL, start_date TEXT, end_date TEXT, price REAL,
-  status TEXT, created_tick INTEGER, published_tick INTEGER, resumed_tick INTEGER, closed_tick INTEGER, note TEXT);
+  status TEXT, created_tick INTEGER, published_tick INTEGER, resumed_tick INTEGER, closed_tick INTEGER, note TEXT, guaranteed INTEGER DEFAULT 0, window_tick INTEGER);
 CREATE TABLE space_offers(id INTEGER PRIMARY KEY AUTOINCREMENT, listing_id INTEGER, request_id TEXT, company TEXT, area REAL, start_date TEXT,
   end_date TEXT, price REAL, status TEXT, arrived_tick INTEGER, valid_until_tick INTEGER, decided_tick INTEGER, reason TEXT, counter TEXT,
   counter_due_tick INTEGER, counter_n INTEGER DEFAULT 0, flag TEXT);

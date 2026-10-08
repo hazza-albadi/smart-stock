@@ -10,6 +10,8 @@ const useWindows = () => useSnap((s) => s.space.windows);
 type Offer = ReturnType<typeof useOffers>[number];
 const useOffers = () => useSnap((s) => s.space.offers);
 type Conflict = ReturnType<typeof useConflicts>[number];
+type AdviceT = ReturnType<typeof useAdvice>[number];
+const useAdvice = () => useSnap((s) => s.space.advice);
 const useConflicts = () => useSnap((s) => s.space.conflicts);
 
 const Row = ({ k, children, tone }: { k: string; children: React.ReactNode; tone?: string }) => {
@@ -124,14 +126,38 @@ const ConflictCard = memo(function ConflictCard({ c }: { c: Conflict }) {
   );
 });
 
+/** A published listing nobody answered within the window: lower the price (when it is above the market band), widen dates or area, split, or withdraw. */
+const AdviceCard = memo(function AdviceCard({ a }: { a: AdviceT }) {
+  const { T, R, DUR, spaceAct } = useApp();
+  const busy = useBusy();
+  const days = useSnap((s) => s.space.settings.offer_window_days);
+  return (
+    <li className="rounded-xl border border-line bg-surface p-3.5">
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+        <Pill tone="Monitor">{T("sp.kind.advice")}</Pill>
+        <span className="text-xs text-muted">{T("dc.waiting")} <span className="num font-semibold text-ink">{DUR(a.age)}</span></span>
+      </div>
+      <h3 className="text-base font-bold leading-snug">{R({ k: "sp.advice.title", v: { zone: a.zone_id, days } })}</h3>
+      <dl className="mt-1.5 space-y-1 text-sm">
+        <Row k="dc.why">{R({ k: a.high ? "sp.advice.why_high" : "sp.advice.why_ok", v: { price: a.price, market: a.market } })}</Row>
+        <Row k="sp.options">{T(a.high ? "sp.advice.opts_high" : "sp.advice.opts_ok")}</Row>
+      </dl>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {a.high && <Btn tone="ok" size="lg" disabled={busy} className="grow sm:grow-0" onClick={() => spaceAct(`/api/space/listings/${a.listing_id}`, { action: "reprice", price: a.suggest_price }, { k: "toast.sp.repriced", v: { zone: a.zone_id, price: a.suggest_price } })}>{R({ k: "sp.btn.reprice", v: { price: a.suggest_price } })}</Btn>}
+        <Btn tone="bad" disabled={busy} onClick={() => spaceAct(`/api/space/listings/${a.listing_id}`, { action: "withdraw" }, { k: "toast.sp.listing_changed", v: { zone: a.zone_id } })}>{T("sp.btn.withdraw")}</Btn>
+      </div>
+    </li>
+  );
+});
+
 /** "Needs your decision" of the Space section: conflicts first, then offers (oldest first), then free windows. Fixed height. */
 export default function SpaceQueue() {
   const { T, N, DUR } = useApp();
-  const windows = useWindows(), offers = useOffers(), conflicts = useConflicts();
+  const windows = useWindows(), offers = useOffers(), conflicts = useConflicts(), advice = useAdvice();
   const kpi = useSnap((s) => s.space.kpi);
   const pend = useMemo(() => offers.filter((o) => o.status === "PENDING").sort((a, b) => b.age_hours - a.age_hours), [offers]);
   const wins = useMemo(() => windows.filter((w) => w.state === "NEW"), [windows]);
-  const total = conflicts.length + pend.length + wins.length;
+  const total = conflicts.length + pend.length + wins.length + advice.length;
   return (
     <section id="decisions" className="card scroll-mt-24" aria-label={T("sp.queue.title")}>
       <div className="flex min-h-[88px] flex-wrap content-start items-start justify-between gap-2 border-b border-line px-4 py-3">
@@ -149,6 +175,7 @@ export default function SpaceQueue() {
         {total === 0 && <li className="h-full"><Empty title={T("sp.queue.empty")} text={T("sp.queue.empty_text")} /></li>}
         {conflicts.map((c) => <ConflictCard key={c.key} c={c} />)}
         {pend.map((o) => <OfferCard key={o.id} o={o} />)}
+        {advice.map((a) => <AdviceCard key={`adv-${a.listing_id}`} a={a} />)}
         {wins.map((w) => <WindowCard key={w.key} w={w} />)}
       </ul>
     </section>

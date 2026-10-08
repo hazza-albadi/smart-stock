@@ -2,19 +2,19 @@ import { db } from "../db";
 import { addDays, addMonths, diffDays } from "../time";
 import { clockAt } from "../clock";
 import { rand } from "../rng";
-import { arrivalDelayHours, arrivalProbability, bidPrice, counterAcceptProbability, dailyIncome } from "../calc";
+import { arrivalDelayHours, arrivalProbability, counterAcceptProbability, dailyIncome, tenantBid } from "../calc";
 import { getSim, M, type Msg } from "../core";
 import { loadSettings, type Settings } from "../settings";
 import { marketCfg, logSpaceEvent, spaceDecision, SpaceError } from "./common";
 import { maxListable, minOver, projectZones, rawFree, type ZoneProj } from "./forecast";
 
-export interface Listing { id: number; zone_id: string; area: number; start_date: string; end_date: string; price: number; status: string; created_tick: number; published_tick: number | null; resumed_tick: number | null; closed_tick: number | null; note: string | null }
+export interface Listing { guaranteed: number; window_tick: number | null; id: number; zone_id: string; area: number; start_date: string; end_date: string; price: number; status: string; created_tick: number; published_tick: number | null; resumed_tick: number | null; closed_tick: number | null; note: string | null }
 export interface Offer {
   id: number; listing_id: number; request_id: string; company: string; area: number; start_date: string; end_date: string; price: number; status: string;
   arrived_tick: number; valid_until_tick: number; decided_tick: number | null; reason: string | null; counter: string | null; counter_due_tick: number | null; counter_n: number; flag: string | null;
 }
 export interface Lease { id: number; offer_id: number; listing_id: number; request_id: string; company: string; zone_id: string; area: number; start_date: string; end_date: string; price: number; status: string; signed_tick: number; ended_tick: number | null; income: number; income_days: number }
-interface Pool { request_id: string; company: string; required_storage_type: string; area_needed_m2: number; duration_months: number; needed_from: string }
+interface Pool { request_id: string; company: string; required_storage_type: string; area_needed_m2: number; duration_months: number; needed_from: string; price_factor: number; source: string }
 
 const all = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).all(...a) as T[];
 const one = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).get(...a) as T | undefined;
@@ -82,6 +82,7 @@ function createLease(o: Offer, l: Listing, tick: number, terms: { area: number; 
     .run(o.id, l.id, o.request_id, o.company, l.zone_id, terms.area, terms.start_date, terms.end_date, terms.price, terms.start_date <= today ? "ACTIVE" : "RESERVED", tick).lastInsertRowid as number;
   // the company has found its space: its other open offers are closed; a fully leased listing is closed
   d.prepare(`UPDATE space_offers SET status='CLOSED', decided_tick=?, reason='taken' WHERE request_id=? AND id<>? AND status IN ('PENDING','COUNTERED')`).run(tick, o.request_id, o.id);
+  d.prepare(`DELETE FROM space_offers WHERE request_id=? AND id<>? AND status='SCHEDULED'`).run(o.request_id, o.id);
   if (listingRest(l) <= 1e-6) d.prepare(`UPDATE space_listings SET status='LEASED', closed_tick=? WHERE id=?`).run(tick, l.id);
   return id;
 }
@@ -171,6 +172,7 @@ export function createListing(i: ListInput): { listingId: number; decisionId: nu
     }
     const id = d.prepare(`INSERT INTO space_listings(zone_id,area,start_date,end_date,price,status,created_tick,published_tick) VALUES(?,?,?,?,?,?,?,?)`)
       .run(i.zone_id, i.area, i.start_date, i.end_date, i.price, i.publish ? "PUBLISHED" : "DRAFT", s.tick, i.publish ? s.tick : null).lastInsertRowid as number;
+    if (i.publish) { d.prepare(`UPDATE space_listings SET window_tick=? WHERE id=?`).run(s.tick, id); planOffers(cfg, getListing(id) as Listing); }
     const decisionId = spaceDecision("LISTING", i.publish ? "PUBLISH" : "DRAFT", { zone: i.zone_id, listing: id, detail: { area: i.area, start: i.start_date, end: i.end_date, price: i.price } });
     logSpaceEvent(i.publish ? "LISTING_PUBLISHED" : "LISTING_DRAFT", M(i.publish ? "ev.sp.published" : "ev.sp.draft", { area: i.area, zone: i.zone_id, start: i.start_date, end: i.end_date, price: i.price }), "info", { actor: "user", ref: String(id) });
     out = { listingId: id, decisionId };
@@ -190,8 +192,8 @@ export function keepVacant(i: { zone_id: string; area: number; start_date: strin
   return { decisionId };
 }
 
-const EV_KEYS = { publish: "ev.sp.publish", pause: "ev.sp.pause", resume: "ev.sp.resume", withdraw: "ev.sp.withdraw", shrink: "ev.sp.shrink" } as const;
-export function setListingStatus(id: number, action: "publish" | "pause" | "resume" | "withdraw" | "shrink", area?: number): { decisionId: number } {
+const EV_KEYS = { publish: "ev.sp.publish", pause: "ev.sp.pause", resume: "ev.sp.resume", withdraw: "ev.sp.withdraw", shrink: "ev.sp.shrink", reprice: "ev.sp.reprice" } as const;
+export function setListingStatus(id: number, action: "publish" | "pause" | "resume" | "withdraw" | "shrink" | "reprice", area?: number, price?: number): { decisionId: number } {
   const d = db();
   const cfg = loadSettings();
   const s = getSim();
@@ -204,7 +206,8 @@ export function setListingStatus(id: number, action: "publish" | "pause" | "resu
     if (action === "publish") {
       if (l.status !== "DRAFT") throw new SpaceError(M("sp.err.listing_closed"));
       if (listingRest(l) > maxListable(cfg, l.zone_id, l.start_date < s.sim_date ? s.sim_date : l.start_date, l.end_date, { excludeListing: l.id }) + 1e-6) throw new SpaceError(M("sp.err.company_needs", { room: 0, area: l.area, po: "", item: "", date: "" }));
-      d.prepare(`UPDATE space_listings SET status='PUBLISHED', published_tick=? WHERE id=?`).run(s.tick, id);
+      d.prepare(`UPDATE space_listings SET status='PUBLISHED', published_tick=?, window_tick=? WHERE id=?`).run(s.tick, s.tick, id);
+      planOffers(cfg, getListing(id) as Listing);
     } else if (action === "pause") {
       if (l.status !== "PUBLISHED") throw new SpaceError(M("sp.err.listing_closed"));
       d.prepare(`UPDATE space_listings SET status='PAUSED' WHERE id=?`).run(id);
@@ -214,14 +217,20 @@ export function setListingStatus(id: number, action: "publish" | "pause" | "resu
     } else if (action === "withdraw") {
       d.prepare(`UPDATE space_listings SET status='WITHDRAWN', closed_tick=? WHERE id=?`).run(s.tick, id);
       d.prepare(`UPDATE space_offers SET status='CLOSED', decided_tick=?, reason='withdrawn' WHERE listing_id=? AND status IN ('PENDING','COUNTERED')`).run(s.tick, id);
+      d.prepare(`DELETE FROM space_offers WHERE listing_id=? AND status='SCHEDULED'`).run(id);
+    } else if (action === "reprice") {
+      if (l.status !== "PUBLISHED" || !(price !== undefined && price > 0)) throw new SpaceError(M("sp.err.bad_terms"));
+      d.prepare(`UPDATE space_listings SET price=?, window_tick=? WHERE id=?`).run(price, s.tick, id);
+      d.prepare(`DELETE FROM space_offers WHERE listing_id=? AND status='SCHEDULED'`).run(id);
+      planOffers(cfg, getListing(id) as Listing);
     } else {
       const leased = l.area - listingRest(l);
       const a = Math.floor(area ?? 0);
       if (!(a >= Math.max(cfg.n("space.min_block_m2"), leased)) || a >= l.area) throw new SpaceError(M("sp.err.bad_terms"));
       d.prepare(`UPDATE space_listings SET area=? WHERE id=?`).run(a, id);
     }
-    decisionId = spaceDecision("LISTING", action.toUpperCase(), { zone: l.zone_id, listing: id, detail: { area: area ?? l.area, before: l.area, price: l.price, start: l.start_date, end: l.end_date } });
-    logSpaceEvent("LISTING_" + action.toUpperCase(), M(EV_KEYS[action], { area: area ?? l.area, zone: l.zone_id }), "info", { actor: "user", ref: String(id) });
+    decisionId = spaceDecision("LISTING", action.toUpperCase(), { zone: l.zone_id, listing: id, detail: { area: area ?? l.area, before: l.area, price: price ?? l.price, was: l.price, start: l.start_date, end: l.end_date } });
+    logSpaceEvent("LISTING_" + action.toUpperCase(), M(EV_KEYS[action], { area: area ?? l.area, zone: l.zone_id, price: price ?? l.price }), "info", { actor: "user", ref: String(id) });
   })();
   return { decisionId };
 }
@@ -235,7 +244,8 @@ export function undoSpace(decisionId: number) {
   d.transaction(() => {
     if (dec.kind === "KEEP_VACANT") { /* the row is removed below: the window comes back */ }
     else if (dec.kind === "LISTING" && (dec.action === "PUBLISH" || dec.action === "DRAFT") && dec.listing_id) {
-      if (one(`SELECT 1 FROM space_offers WHERE listing_id=?`, dec.listing_id)) throw new SpaceError(M("sp.err.cannot_undo"));
+      if (one(`SELECT 1 FROM space_offers WHERE listing_id=? AND status<>'SCHEDULED'`, dec.listing_id)) throw new SpaceError(M("sp.err.cannot_undo"));
+      d.prepare(`DELETE FROM space_offers WHERE listing_id=?`).run(dec.listing_id);
       d.prepare(`DELETE FROM space_listings WHERE id=?`).run(dec.listing_id);
     } else if (dec.kind === "OFFER" && dec.action === "REJECT" && dec.offer_id) {
       const o = getOffer(dec.offer_id);
@@ -277,6 +287,13 @@ export function spaceHour(cfg: Settings, tick: number) {
     }
   }
 
+  // planned offers whose hour has come become visible (a paused listing receives none until it is back online)
+  for (const o of all<Offer>(`SELECT o.* FROM space_offers o JOIN space_listings l ON l.id=o.listing_id WHERE o.status='SCHEDULED' AND o.arrived_tick<=? AND l.status='PUBLISHED' ORDER BY o.arrived_tick, o.id`, tick)) {
+    d.prepare(`UPDATE space_offers SET status='PENDING', valid_until_tick=? WHERE id=?`).run(Math.max(o.arrived_tick, tick) + cfg.n("space.offer_validity_h"), o.id);
+    const l = getListing(o.listing_id) as Listing;
+    logSpaceEvent("OFFER_ARRIVED", M("ev.sp.offer", { company: o.company, area: o.area, zone: l.zone_id, start: o.start_date, end: o.end_date, price: o.price }), "info", { ref: o.request_id });
+  }
+
   for (const o of all<Offer>(`SELECT * FROM space_offers WHERE status='PENDING' AND valid_until_tick<=?`, tick)) {
     d.prepare(`UPDATE space_offers SET status='EXPIRED', decided_tick=? WHERE id=?`).run(tick, o.id);
     logSpaceEvent("OFFER_EXPIRED", M("ev.sp.expired", { company: o.company, area: o.area }), "info", { ref: String(o.id) });
@@ -302,7 +319,53 @@ export function spaceHour(cfg: Settings, tick: number) {
   generateOffers(cfg, tick);
 }
 
-/** Pool of potential tenants + published listings -> offers over time. Deterministic: the same seed gives the same offers at the same hours. */
+/** The terms a company offers for a listing: its own need (adapted to the listing about half of the time) and what it is willing to pay (below, at or above the asking price). */
+function buildTerms(cfg: Settings, l: Listing, r: Pool, dueTick: number) {
+  const seed = cfg.n("sim.seed"), mk = marketCfg(cfg);
+  const rest = listingRest(l);
+  let start = r.needed_from, area = r.area_needed_m2;
+  const dueDate = dateOf(dueTick);
+  if (start <= dueDate) start = addDays(dueDate, 1);
+  let end = addMonths(start, r.duration_months);
+  if (rand(`${seed}|fit|${l.id}|${r.request_id}`) < cfg.n("space.offer_fit_prob")) {
+    const fs = start < l.start_date ? l.start_date : start, fe = end > l.end_date ? l.end_date : end;
+    if (diffDays(fe, fs) >= cfg.n("space.min_lease_days")) { start = fs; end = fe; area = Math.min(area, rest); }
+  }
+  const price = tenantBid(mk.market, r.price_factor ?? 1, cfg.n("space.offer_bid_spread_pct"), rand(`${seed}|bid|${l.id}|${r.request_id}`));
+  return { area, start, end, price };
+}
+
+/** Does the company's price reach the asking price closely enough to make an offer at all? */
+const willing = (cfg: Settings, l: Listing, r: Pool) =>
+  tenantBid(marketCfg(cfg).market, r.price_factor ?? 1, cfg.n("space.offer_bid_spread_pct"), rand(`${cfg.n("sim.seed")}|bid|${l.id}|${r.request_id}`)) >= l.price * cfg.n("space.min_bid_ratio");
+
+export const reasonablePrice = (cfg: Settings, price: number) => price <= marketCfg(cfg).market * (1 + marketCfg(cfg).bandPct / 100) + 1e-9;
+
+/**
+ * Reliable arrival: when a listing goes online at a reasonable price, `space.offer_min_count` companies are chosen (seeded ranking of the free pool) and their offers are
+ * planned inside `space.offer_window_days`, spread over hours. They stay invisible until their hour. Above the market band nothing is guaranteed.
+ */
+export function planOffers(cfg: Settings, l: Listing) {
+  const d = db();
+  const seed = cfg.n("sim.seed"), type = cfg.s("space.rentable_request_type");
+  const k = Math.floor(cfg.n("space.offer_min_count")), windowH = cfg.n("space.offer_window_days") * 24, minDelay = Math.min(cfg.n("space.offer_delay_min_h"), Math.floor(windowH / 2));
+  d.prepare(`UPDATE space_listings SET guaranteed=0 WHERE id=?`).run(l.id);
+  if (!reasonablePrice(cfg, l.price) || k <= 0) return;
+  const start = l.window_tick ?? l.published_tick ?? getSim().tick;
+  const free = all<Pool>(`SELECT * FROM space_requests WHERE required_storage_type=? ORDER BY request_id`, type)
+    .filter((r) => !one(`SELECT 1 FROM space_leases WHERE request_id=?`, r.request_id) && !one(`SELECT 1 FROM space_offers WHERE listing_id=? AND request_id=?`, l.id, r.request_id) && r.needed_from < l.end_date)
+    .sort((a, b) => rand(`${seed}|rank|${l.id}|${a.request_id}`) - rand(`${seed}|rank|${l.id}|${b.request_id}`));
+  const chosen = free.slice(0, k);
+  chosen.forEach((r, i) => {
+    const due = start + Math.round(minDelay + ((i + rand(`${seed}|spread|${l.id}|${r.request_id}`)) / chosen.length) * Math.max(0, windowH - 6 - minDelay));
+    const t = buildTerms(cfg, l, r, due);
+    d.prepare(`INSERT INTO space_offers(listing_id,request_id,company,area,start_date,end_date,price,status,arrived_tick,valid_until_tick) VALUES(?,?,?,?,?,?,?,'SCHEDULED',?,?)`)
+      .run(l.id, r.request_id, r.company, t.area, t.start, t.end, t.price, due, due + cfg.n("space.offer_validity_h"));
+  });
+  d.prepare(`UPDATE space_listings SET guaranteed=? WHERE id=?`).run(chosen.length, l.id);
+}
+
+/** Pool of potential tenants + published listings -> more offers over time (the planned ones are on top of this). Deterministic: the same seed gives the same offers at the same hours. */
 export function generateOffers(cfg: Settings, tick: number) {
   const d = db();
   const seed = cfg.n("sim.seed"), mk = marketCfg(cfg), type = cfg.s("space.rentable_request_type");
@@ -318,20 +381,27 @@ export function generateOffers(cfg: Settings, tick: number) {
       const due = (l.published_tick ?? l.created_tick) + arrivalDelayHours(l.price, rand(`${seed}|delay|${l.id}|${r.request_id}`), mk);
       if (tick < due) continue;
       if (rand(`${seed}|prob|${l.id}|${r.request_id}`) >= arrivalProbability(l.price, mk)) continue;
-      let start = r.needed_from, area = r.area_needed_m2;
-      const dueDate = dateOf(due);
-      if (start <= dueDate) start = addDays(dueDate, 1);
-      let end = addMonths(start, r.duration_months);
-      if (rand(`${seed}|fit|${l.id}|${r.request_id}`) < cfg.n("space.offer_fit_prob")) {
-        const fs = start < l.start_date ? l.start_date : start, fe = end > l.end_date ? l.end_date : end;
-        if (diffDays(fe, fs) >= cfg.n("space.min_lease_days")) { start = fs; end = fe; area = Math.min(area, rest); }
-      }
-      const price = bidPrice(l.price, mk.market, cfg.n("space.offer_bid_spread_pct"), rand(`${seed}|bid|${l.id}|${r.request_id}`));
+      if (!willing(cfg, l, r)) continue;
+      const t = buildTerms(cfg, l, r, due);
       d.prepare(`INSERT INTO space_offers(listing_id,request_id,company,area,start_date,end_date,price,status,arrived_tick,valid_until_tick) VALUES(?,?,?,?,?,?,?,'PENDING',?,?)`)
-        .run(l.id, r.request_id, r.company, area, start, end, price, due, due + cfg.n("space.offer_validity_h"));
-      logSpaceEvent("OFFER_ARRIVED", M("ev.sp.offer", { company: r.company, area, zone: l.zone_id, start, end, price }), "info", { ref: r.request_id });
+        .run(l.id, r.request_id, r.company, t.area, t.start, t.end, t.price, due, due + cfg.n("space.offer_validity_h"));
+      logSpaceEvent("OFFER_ARRIVED", M("ev.sp.offer", { company: r.company, area: t.area, zone: l.zone_id, start: t.start, end: t.end, price: t.price }), "info", { ref: r.request_id });
     }
   }
+}
+
+/** A listing that got no offer in the window: what the manager can change (price, dates / area, split). */
+export function listingAdvice(cfg: Settings) {
+  const tick = getSim().tick, windowH = cfg.n("space.offer_window_days") * 24, mk = marketCfg(cfg);
+  const out: { listing_id: number; zone_id: string; price: number; market: number; high: boolean; suggest_price: number; age: number }[] = [];
+  for (const l of all<Listing>(`SELECT * FROM space_listings WHERE status='PUBLISHED' ORDER BY id`)) {
+    const since = l.window_tick ?? l.published_tick ?? tick;
+    if (tick - since < windowH || listingRest(l) <= 0) continue;
+    if (one(`SELECT 1 FROM space_offers WHERE listing_id=?`, l.id)) continue;
+    const high = !reasonablePrice(cfg, l.price);
+    out.push({ listing_id: l.id, zone_id: l.zone_id, price: l.price, market: mk.market, high, suggest_price: Math.min(l.price, cfg.n("space.price_suggested")), age: tick - since });
+  }
+  return out;
 }
 
 /** Demand that never became (and cannot become) an offer, with the plain reason. Informational. */
@@ -355,7 +425,7 @@ export function unmatchedDemand(cfg: Settings) {
     const due = (l.published_tick as number) + arrivalDelayHours(l.price, rand(`${seed}|delay|${l.id}|${r.request_id}`), mk);
     if (tick < due) continue;
     if (r.needed_from >= l.end_date) out.push({ ...base, reason: M("sp.unmatched.dates", { to: l.end_date }) });
-    else if (rand(`${seed}|prob|${l.id}|${r.request_id}`) >= arrivalProbability(l.price, mk)) out.push({ ...base, reason: M("sp.unmatched.price", { price: l.price, market: mk.market }) });
+    else if (rand(`${seed}|prob|${l.id}|${r.request_id}`) >= arrivalProbability(l.price, mk) || !willing(cfg, l, r)) out.push({ ...base, reason: M("sp.unmatched.price", { price: l.price, market: mk.market }) });
   }
   return out;
 }

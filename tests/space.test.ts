@@ -37,7 +37,7 @@ function addPo(zone: string, areaM2: number, arrival: string, id = "TEST-PO-1") 
   runAll({ group: "t", trigger: "decision" });
   return { it, qty };
 }
-const waitForOffer = (maxDays = 8) => { for (let i = 0; i < maxDays * 24 && !q(`SELECT 1 FROM space_offers`).length; i++) advance({ hours: 1 }); return q(`SELECT * FROM space_offers ORDER BY id`); };
+const waitForOffer = (maxDays = 8) => { for (let i = 0; i < maxDays * 24 && !q(`SELECT 1 FROM space_offers WHERE status='PENDING'`).length; i++) advance({ hours: 1 }); return q(`SELECT * FROM space_offers WHERE status<>'SCHEDULED' ORDER BY id`); };
 
 test("day 0: free windows only in rentable zones; nothing listed, no offers, no leases; physical numbers unchanged", () => {
   fresh();
@@ -183,7 +183,7 @@ test("counter-offer: the company answers after a seeded delay; the answer is det
     const w = biggest();
     listWindow({ zone_id: w.zone_id, area: w.area, start_date: w.start, end_date: w.end, price: 4, publish: true });
     waitForOffer(10);
-    const o = q(`SELECT * FROM space_offers ORDER BY id`)[0];
+    const o = q(`SELECT * FROM space_offers WHERE status='PENDING' ORDER BY id`)[0];
     const l = getListing(o.listing_id)!;
     const ev = evaluateOffer(loadSettings(), o, l);
     const t = ev.suggest ?? { area: Math.min(o.area, w.area), start: o.start_date, end: o.end_date, price: Math.max(o.price, l.price) };

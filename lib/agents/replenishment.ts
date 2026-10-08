@@ -1,21 +1,14 @@
 import { db } from "../db";
 import { addDays } from "../time";
-import { budgetFigures, reorderPoint, demandOver, poWithin, roundUpTo } from "../calc";
+import { reorderPoint, demandOver, poWithin, roundUpTo } from "../calc";
 import { getSim, logRun, logEvent, upsertRec, reopenRec, recPayload, M, type AgentResult, type Item, type Msg } from "../core";
 import { loadSettings } from "../settings";
 import { loadLive, type Live } from "../live";
 import { zoneRoomBase } from "../stock";
 import { leasedOn } from "../zones";
+import { budgetInfo } from "../budget";
 
-export function budgetInfo() {
-  const b = db().prepare(`SELECT * FROM purchasing_budget LIMIT 1`).get() as {
-    period_start: string; period_end: string; total_purchasing_budget_omr: number;
-  };
-  const pos = db().prepare(`SELECT p.quantity, i.unit_cost_omr unit_cost, p.premium FROM purchase_orders_open p JOIN items i ON i.item_id=p.item_id`).all() as
-    { quantity: number; unit_cost: number; premium: number }[];
-  const f = budgetFigures(b.total_purchasing_budget_omr, pos);
-  return { total: f.total, start: b.period_start, end: b.period_end, committed: f.committed, free: f.free, overBudget: f.overBudget };
-}
+export { budgetInfo };
 
 /** Context stored with a recommendation, used later to tell whether a rejected draft got materially worse. */
 export const recContext = (l: Live) => ({ cover: l.cover, stockout_hours: l.stockout?.hours ?? null });
@@ -65,6 +58,7 @@ export function replenishmentAgent(group: string, trigger: string): AgentResult 
   const review = cfg.n("repl.review_days"), maxCover = cfg.n("repl.max_cover_weeks");
   const round = cfg.j<Record<string, number>>("repl.round_to");
   const prio = cfg.j<string[]>("repl.priority_categories");
+  const alts = cfg.j<Record<string, string>>("alerts.alternatives"), horizon = cfg.n("budget.emergency_horizon_days");
   const cooldown = cfg.n("repl.reject_cooldown_hours"), dropRatio = cfg.n("repl.reopen_cover_drop");
   // criticality classes sort alphabetically (A = essential ... C = can wait); the first class may be trimmed to fit the budget
   const topCrit = ([...new Set([...live.values()].map((l) => l.item.criticality))].sort()[0]) ?? "";
@@ -126,6 +120,11 @@ export function replenishmentAgent(group: string, trigger: string): AgentResult 
         continue;
       }
     }
+    // a quantity the manager changed survives the hourly refresh, and funding / room are judged on it
+    const prevPending = recPayload(key);
+    if (prevPending?.status === "PENDING" && prevPending.payload.edited && prevPending.payload.qty > 0) {
+      c.qty = prevPending.payload.qty; c.minQty = Math.min(c.minQty, c.qty); c.cost = c.qty * it.unit_cost_omr;
+    }
     // cap by physical room: stage the order or flag that there is no room
     let staged: Msg | null = null;
     const step = round[it.unit] ?? 1;
@@ -154,16 +153,34 @@ export function replenishmentAgent(group: string, trigger: string): AgentResult 
     else status = "DEFERRED";
     const cost = qty * it.unit_cost_omr;
 
+    // Not enough free budget: the agent never goes silent. A critical item at risk becomes an emergency budget request,
+    // everything else is deferred to the next budget period; both are still suggestions the manager sees and decides on.
+    let funding: "FUNDED" | "PARTIAL" | "NEEDS_EXTRA" | "DEFERRED" = status;
+    let info: Record<string, unknown> | null = null;
+    let reasonParts: Msg[] = parts;
     if (status === "DEFERRED") {
       deferred++;
-      plan.push([it.item_id, c.rank, c.qty, c.minQty, c.cost, "DEFERRED",
-        JSON.stringify([M("repl.r.deferred", { cost: c.cost, left: Math.max(0, remaining), crit: it.criticality }), ...parts]), c.rop, c.position, sim.tick]);
-      continue;
+      promise(it, c.qty * it.space_m2_per_unit); // an unfunded suggestion can still be approved: it keeps its room, so approvals together never overfill a zone
+      const free = Math.max(0, remaining);
+      const extra = c.cost - free;
+      const atRisk = c.crit === topCrit && (c.urgency === 0 || (!!l.stockout && l.stockout.hours <= (it.lead_time_days + horizon) * 24));
+      const affordable = (money: number) => Math.min(c.qty, Math.floor(money / it.unit_cost_omr / step) * step);
+      const small = affordable(free), inLimit = affordable(free + bud.emergencyRoom);
+      funding = atRisk ? "NEEDS_EXTRA" : "DEFERRED";
+      info = {
+        free, needed: c.cost, extra, emergency_room: bud.emergencyRoom, within_limit: extra <= bud.emergencyRoom + 1e-9, max_qty_in_limit: inLimit, max_cost_in_limit: inLimit * it.unit_cost_omr,
+        small_qty: small, small_cost: small * it.unit_cost_omr, renewal_date: bud.nextStart, renewal_tick: bud.renewalTick, alt_item: alts[it.item_id] ?? null,
+      };
+      reasonParts = [funding === "NEEDS_EXTRA"
+        ? M("repl.r.needs_extra", { cost: c.cost, left: free, extra, date: l.stockout?.date ?? "", hours: l.stockout?.hours ?? 0 })
+        : M("repl.r.deferred_next", { cost: c.cost, left: free, date: bud.nextStart }), ...parts];
+      plan.push([it.item_id, c.rank, c.qty, c.minQty, c.cost, "DEFERRED", JSON.stringify([M("repl.r.deferred", { cost: c.cost, left: free, crit: it.criticality }), ...parts]), c.rop, c.position, sim.tick]);
+    } else {
+      remaining -= cost; newCost += cost; funded++;
+      promise(it, qty * it.space_m2_per_unit);
+      reasonParts = status === "PARTIAL" ? [M("repl.r.partial", { qty: c.qty, cost: c.cost }), ...parts] : parts;
+      plan.push([it.item_id, c.rank, qty, c.minQty, cost, status, JSON.stringify(reasonParts), c.rop, c.position, sim.tick]);
     }
-    remaining -= cost; newCost += cost; funded++;
-    promise(it, qty * it.space_m2_per_unit);
-    const reason = status === "PARTIAL" ? [M("repl.r.partial", { qty: c.qty, cost: c.cost }), ...parts] : parts;
-    plan.push([it.item_id, c.rank, qty, c.minQty, cost, status, JSON.stringify(reason), c.rop, c.position, sim.tick]);
 
     // a quantity edited by the user survives the hourly refresh
     const existing = recPayload(key);
@@ -172,7 +189,8 @@ export function replenishmentAgent(group: string, trigger: string): AgentResult 
     const payload = {
       item_id: it.item_id, qty: q, suggested_qty: qty, edited, unit: it.unit, unit_cost: it.unit_cost_omr, cost: q * it.unit_cost_omr,
       supplier_id: it.supplier_id, lead_days: it.lead_time_days, expected_arrival: addDays(now.date, it.lead_time_days), priority: c.rank,
-      status, reason, ctx: recContext(l), room: { need, qty, staged: !!staged, leased_m2: leasedM2 }, reopen_reason: reopen ?? existing?.payload.reopen_reason ?? null,
+      status, funding, funding_info: info, stockout: l.stockout ? { hours: l.stockout.hours, date: l.stockout.date } : null,
+      reason: reasonParts, ctx: recContext(l), room: { need, qty, staged: !!staged, leased_m2: leasedM2 }, reopen_reason: reopen ?? existing?.payload.reopen_reason ?? null,
     };
     if (reopen) {
       reopenRec(key, payload);

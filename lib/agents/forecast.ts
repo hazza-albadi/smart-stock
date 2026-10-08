@@ -1,15 +1,23 @@
 import { db } from "../db";
-import { addDays } from "../time";
+import { addDays, diffDays } from "../time";
 import { seasonFactor, type SeasonCfg } from "../calc";
 import { getItems, getSim, logRun, M, type AgentResult } from "../core";
 import { loadSettings } from "../settings";
 import { loadLive } from "../live";
 
-/** Total OUT (excluding expiry write-offs) in [from, to]. */
+/**
+ * Total demand in [from, to]: stock issued (excluding expiry write-offs) PLUS demand that could not be served because the item was out of stock.
+ * Without the unmet part, an item that runs out looks as if nobody uses it any more, its usage forecast falls to zero, it is classed as "too much stock"
+ * and is never ordered again (the second root cause of items sitting at zero).
+ */
 function outBetween(itemId: string, from: string, to: string): number {
-  return (db().prepare(
+  const issued = (db().prepare(
     `SELECT COALESCE(SUM(quantity),0) q FROM stock_movements WHERE item_id=? AND movement_type='OUT' AND reference!='EXPIRED' AND date BETWEEN ? AND ?`,
   ).get(itemId, from, to) as { q: number }).q;
+  const start = getSim().start_date;
+  const unmet = (db().prepare(`SELECT COALESCE(SUM(planned-issued),0) q FROM demand_log WHERE item_id=? AND day BETWEEN ? AND ? AND planned>issued`)
+    .get(itemId, diffDays(from, start), diffDays(to, start)) as { q: number }).q;
+  return issued + unmet;
 }
 
 /** Agent 1 (READ): weekly usage, seasonal forecast, demand anomaly. Stock-dependent figures (cover, stock-out) are always computed live. */

@@ -6,6 +6,7 @@ import { addDays } from "./time";
 import { loadSettings, type SettingRow } from "./settings";
 import { deliveryHour } from "./calc";
 import { M } from "./core";
+import { generateTenantPool } from "./space/pool";
 
 const root = () => process.cwd();
 const read = (f: string) => parseCsv(fs.readFileSync(path.join(root(), "smartstock_data", f), "utf8"));
@@ -69,6 +70,8 @@ export function seedDatabase(o: { keepSettings?: boolean; overrides?: Record<str
     ins("space_requests", read("space_requests.csv").map((r) => ({
       ...r, area_needed_m2: +r.area_needed_m2, duration_months: +r.duration_months, source: "DATA", created_tick: 0,
     })));
+
+    generateTenantPool(cfg); // extra SIMULATED companies (seeded) next to the CSV requests
 
     // Last day with history data; the simulation starts after it.
     const historyEnd = (d.prepare(`SELECT MAX(date) m FROM stock_movements`).get() as { m: string }).m;

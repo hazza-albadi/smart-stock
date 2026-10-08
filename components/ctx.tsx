@@ -27,7 +27,7 @@ export interface AppApi {
   spaceAct: (url: string, body: unknown, toast?: Msg) => Promise<boolean>;
   section: "purchasing" | "space";
   setSection: (s: "purchasing" | "space") => void;
-  postpone: (id: number) => Promise<void>;
+  postpone: (id: number, untilTick?: number) => Promise<void>;
   editQty: (id: number, qty: number) => Promise<void>;
   select: (itemId: string) => void;
   post: (url: string, body: unknown, method?: string) => Promise<any>;

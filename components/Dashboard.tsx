@@ -198,9 +198,10 @@ export default function Dashboard() {
     try { const r = await post(`/api/recommendations/${id}`, { decision, ...o }); pushToast({ msg, undo: r.decision_id, tone: decision === "APPROVED" ? "ok" : "bad" }); }
     catch (e) { fail(e); }
   };
-  const postpone: AppApi["postpone"] = async (id) => {
-    const hours = getSnapshot()?.sim.postpone_hours ?? 24;
-    try { await post(`/api/recommendations/${id}`, { postpone: true }, "PATCH"); pushToast({ msg: { k: "toast.postponed", v: { hours } } }); } catch (e) { fail(e); }
+  const postpone: AppApi["postpone"] = async (id, untilTick) => {
+    const snap = getSnapshot();
+    const hours = untilTick !== undefined ? untilTick - (snap?.sim.tick ?? 0) : snap?.sim.postpone_hours ?? 24;
+    try { await post(`/api/recommendations/${id}`, { postpone: true, until: untilTick }, "PATCH"); pushToast({ msg: { k: "toast.postponed", v: { hours } } }); } catch (e) { fail(e); }
   };
   const editQty: AppApi["editQty"] = async (id, qty) => { try { await post(`/api/recommendations/${id}`, { qty }, "PATCH"); } catch (e) { fail(e); } };
   const undo = async (decisionId: number, toastIdx: number, url = "/api/undo") => {

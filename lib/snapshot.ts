@@ -4,7 +4,7 @@ import { getSim, type Lot } from "./core";
 import { loadSettings } from "./settings";
 import { loadLive } from "./live";
 import { statusOf, ex, demandOver, coverHours, type Explain, type Status } from "./calc";
-import { budgetInfo } from "./agents/replenishment";
+import { budgetInfo, periods, budgetFor } from "./budget";
 import { AGENT_ORDER } from "./agents/coordinator";
 import { computeZones } from "./zones";
 import { spaceSnapshot } from "./space/snapshot";
@@ -76,7 +76,7 @@ export function snapshot() {
   });
 
   const bud = budgetInfo();
-  const pendingPo = recs.filter((r) => r.kind === "PO" && r.status === "PENDING" && r.source === "agent").reduce((a, r) => a + r.payload.cost, 0);
+  const pendingPo = recs.filter((r) => r.kind === "PO" && r.status === "PENDING" && r.source === "agent").reduce((a, r) => a + (r.payload.funding === "NEEDS_EXTRA" || r.payload.funding === "DEFERRED" ? 0 : r.payload.cost), 0);
   const plan = all(`SELECT p.*, i.name_ar, i.name_en, i.unit, i.criticality FROM replenishment_plan p JOIN items i ON i.item_id=p.item_id ORDER BY p.rank, p.item_id`)
     .map((p) => ({ ...p, reason: JSON.parse(p.reason),
       explain: p.status === "OVERSTOCK" ? null : ex("ex.rop", [
@@ -99,13 +99,15 @@ export function snapshot() {
   const pending = recs.filter((r) => r.status === "PENDING").length;
 
   const kpi = {
-    items_at_risk: riskItems.size, budget_remaining: bud.free, budget_after_drafts: bud.free - pendingPo, over_budget: bud.overBudget,
+    items_at_risk: riskItems.size, budget_remaining: bud.free, budget_after_drafts: bud.free - pendingPo, over_budget: bud.overBudget, budget_granted: bud.granted, budget_days_left: bud.daysLeft, budget_renews: bud.nextStart, emergency_spend: bud.emergencyUsed, emergency_room: bud.emergencyRoom,
     rentable_m2: rentable, po_open: (all(`SELECT COUNT(*) n FROM purchase_orders_open WHERE status IN ('OPEN','DELAYED_BY_SUPPLIER')`)[0]?.n as number) ?? 0, pending,
   };
   const kpiExplain: Record<string, Explain> = {
     risk: ex("ex.kpi.risk", [{ label: "ex.in.alerts_ch", value: alerts.filter((a) => a.severity === "Critical" || a.severity === "High").length, source: "alerts" }], riskItems.size),
     budget: ex("ex.kpi.budget", [
-      { label: "ex.in.budget_total", value: bud.total, unit: "OMR", source: "purchasing_budget" },
+      { label: "ex.in.budget_total", value: bud.base, unit: "OMR", source: "purchasing_budget" },
+      ...(bud.rollover > 0 ? [{ label: "ex.in.rollover", value: bud.rollover, unit: "OMR", source: "purchasing_budget" }] : []),
+      ...(bud.topup > 0 ? [{ label: "ex.in.topup", value: bud.topup, unit: "OMR", source: "budget_topups" }] : []),
       { label: "ex.in.committed", value: bud.committed, unit: "OMR", source: "purchase_orders_open × items.unit_cost" },
     ], bud.free, "OMR"),
     rentable: ex("ex.kpi.rentable", zones.filter((z) => z.rent_allowed).flatMap((z) => [
@@ -123,8 +125,12 @@ export function snapshot() {
     },
     names: Object.fromEntries(items.map((i) => [i.item_id, { name_en: i.name_en, name_ar: i.name_ar, unit: i.unit }])),
     kpi, kpi_explain: kpiExplain, items, alerts, recs, plan, space: spaceSnapshot(), runs, events, recent_movements: recent, totals, health,
-    budget: { total: bud.total, committed: bud.committed, new_funded: pendingPo, start: bud.start, end: bud.end, over: bud.overBudget,
-      explain: ex("ex.budget", [{ label: "ex.in.budget_total", value: bud.total, unit: "OMR" }, { label: "ex.in.committed", value: bud.committed, unit: "OMR" }, { label: "ex.in.drafts", value: pendingPo, unit: "OMR" }], bud.free - pendingPo, "OMR") },
+    budget: {
+      total: bud.granted, base: bud.base, rollover: bud.rollover, topup: bud.topup, committed: bud.committed, placed: bud.placed, carried: bud.carried, free: bud.free,
+      new_funded: pendingPo, start: bud.start, end: bud.end, over: bud.overBudget, days_left: bud.daysLeft, next_start: bud.nextStart, next_amount: bud.nextAmount,
+      emergency_used: bud.emergencyUsed, emergency_limit: bud.emergencyLimit, emergency_room: bud.emergencyRoom, low_limit: bud.lowLimit,
+      periods: periods().slice(-6).map((p) => { const f = budgetFor(p); return { id: p.id, start: p.period_start, end: p.period_end, base: f.base, rollover: f.rollover, topup: f.topup, committed: f.committed, free: f.free, current: p.id === bud.id }; }),
+      explain: ex("ex.budget", [{ label: "ex.in.budget_total", value: bud.granted, unit: "OMR" }, { label: "ex.in.committed", value: bud.committed, unit: "OMR" }, { label: "ex.in.drafts", value: pendingPo, unit: "OMR" }, ...(bud.topup > 0 ? [{ label: "ex.in.topup", value: bud.topup, unit: "OMR" }] : [])], bud.free - pendingPo, "OMR") },
     zones: zones.map((z) => ({ ...z, explain: ex("ex.zone", [
       { label: "ex.in.capacity", value: z.capacity, unit: "m²", source: "warehouse_zones" },
       { label: "ex.in.fixed", value: z.fixed, unit: "m²", source: "warehouse_zones" },

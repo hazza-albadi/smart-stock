@@ -9,7 +9,7 @@ export interface SpaceImpactRow { id: number; tick: number; kind: string; decisi
 /** Impact texts of listing decisions by action (head, effect). */
 const LISTING_KEYS: Record<string, [string, string]> = {
   PAUSE: ["impact.sp.head.listing_pause", "impact.sp.e.listing_pause"], RESUME: ["impact.sp.head.listing_resume", "impact.sp.e.listing_resume"],
-  WITHDRAW: ["impact.sp.head.listing_withdraw", "impact.sp.e.listing_withdraw"], SHRINK: ["impact.sp.head.listing_shrink", "impact.sp.e.listing_shrink"],
+  WITHDRAW: ["impact.sp.head.listing_withdraw", "impact.sp.e.listing_withdraw"], REPRICE: ["impact.sp.head.listing_reprice", "impact.sp.e.listing_reprice"], SHRINK: ["impact.sp.head.listing_shrink", "impact.sp.e.listing_shrink"],
 };
 
 const all = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).all(...a) as T[];
@@ -82,7 +82,7 @@ export function spaceImpact(limit = 60): SpaceImpactRow[] {
       if (r.action === "COUNTER_ACCEPTED") leaseEffects(r.lease_id); else state = "none";
     } else if (r.kind === "LISTING") {
       const key = LISTING_KEYS[r.action];
-      head = key ? M(key[0], { zone: r.zone_id, when: w, area: d.area }) : M("impact.head.generic", { kind: r.kind, when: w });
+      head = key ? M(key[0], { zone: r.zone_id, when: w, area: d.area, price: d.price, was: d.was }) : M("impact.head.generic", { kind: r.kind, when: w });
       if (key) effects.push(M(key[1]));
     } else { head = M("impact.head.generic", { kind: r.kind, when: w }); state = "none"; }
     return { id: r.id, tick: r.tick, kind: r.kind, decision: r.action, head, effects, state, flow: "space", item_id: null, request_id: null };

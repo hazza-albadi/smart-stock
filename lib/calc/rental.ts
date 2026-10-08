@@ -83,3 +83,7 @@ export function counterAcceptProbability(offer: CounterTerms, counter: CounterTe
 
 /** Rent for one day: price is per m2 per month; a month counts `daysPerMonth` days. */
 export const dailyIncome = (area: number, pricePerMonth: number, daysPerMonth: number) => (daysPerMonth > 0 ? (area * pricePerMonth) / daysPerMonth : 0);
+
+/** What a company is willing to pay per m2 per month: the market price x its own price factor x a small spread (draw 0..1 gives -spread..+spread). */
+export const tenantBid = (market: number, factor: number, spreadPct: number, draw: number) =>
+  Math.round(market * factor * (1 + ((draw * 2 - 1) * spreadPct) / 100) * 1000) / 1000;

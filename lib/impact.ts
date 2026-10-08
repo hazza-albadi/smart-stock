@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { clockAt } from "./clock";
 import { getSim, M, type Msg } from "./core";
-import { budgetInfo } from "./agents/replenishment";
+import { budgetInfo } from "./budget";
 import { spaceImpact } from "./space/impact";
 
 export interface ImpactRow {
@@ -50,7 +50,7 @@ function purchasingImpact(limit = 60): ImpactRow[] {
         const so = firstStockout(r.item_id, r.tick, sim.tick + 1);
         if (so !== undefined) effects.push(M("impact.e.stockout_waiting", { item: r.item_id, when: when(so), hours: unmetHours(r.item_id, r.tick, sim.tick + 1) }));
       }
-      if (d.over_budget) effects.push(M("impact.e.over_budget", { free: budgetInfo().free }));
+      if (d.emergency_spend > 0) effects.push(M("impact.e.emergency_spend", { amount: d.emergency_spend, free: budgetInfo().free }));
       for (const e of all(`SELECT tick FROM events WHERE type IN ('SPACE_CONFLICT','OFFER_BLOCKED') AND json_extract(meta,'$.po')=? ORDER BY tick LIMIT 3`, d.po)) effects.push(M("impact.e.po_space_conflict", { when: when(e.tick) }));
     } else if (r.kind === "PO" && r.decision === "REJECTED") {
       head = M("impact.head.po_rejected", { item: r.item_id, qty: d.qty, when: w });

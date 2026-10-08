@@ -5,7 +5,8 @@ import { deliveryHour } from "./calc";
 import { getSim, getItems, logEvent, M, UserError, type Item, type Msg } from "./core";
 import { loadSettings } from "./settings";
 import { loadLive } from "./live";
-import { budgetInfo, recContext, roomModel } from "./agents/replenishment";
+import { recContext, roomModel } from "./agents/replenishment";
+import { budgetInfo, recordTopup, removeTopup } from "./budget";
 import { runAll } from "./agents/coordinator";
 import { issueFefo, receiveGoods, totalOnHand } from "./stock";
 
@@ -33,7 +34,7 @@ function placePo(item: Item, qty: number, o: { emergency: boolean; recKey: strin
   d.prepare(`INSERT INTO purchase_orders_open(po_id,item_id,supplier_id,quantity,order_date,expected_arrival,status,source,received_date,expected_hour,ordered_tick,received_tick,emergency,premium,rec_key)
     VALUES(?,?,?,?,?,?,'OPEN',?,NULL,?,?,NULL,?,?,?)`).run(poId, item.item_id, item.supplier_id, qty, s.sim_date, arrival, o.source, hour, s.tick, o.emergency ? 1 : 0, premium, o.recKey);
   const cost = qty * item.unit_cost_omr * (1 + premium);
-  return { poId, arrival, hour, cost, over: budgetInfo().overBudget };
+  return { poId, arrival, hour, cost, over: false };
 }
 
 export interface DecideOpts { qty?: number; variant?: "primary" | "split"; area?: number }
@@ -49,6 +50,7 @@ export function decide(id: number, decision: "APPROVED" | "REJECTED", opts: Deci
   const ok = decision === "APPROVED";
   const cfg = loadSettings();
   let decisionId = 0;
+  let roomUnits: number | null = null, capped: number | null = null;
 
   d.transaction(() => {
     let detail: Record<string, unknown> = {};
@@ -58,16 +60,36 @@ export function decide(id: number, decision: "APPROVED" | "REJECTED", opts: Deci
       const live = loadLive(cfg, { date: s.sim_date, hour: s.hour }).get(it.item_id);
       const ctx = live ? recContext(live) : p.ctx;
       if (ok) {
-        const qty = Math.max(1, Math.floor(opts.qty ?? p.qty));
+        let qty = Math.max(1, Math.floor(opts.qty ?? p.qty));
         // same-hour collision: a lease signed meanwhile may have taken the room this order needs; checked inside this transaction
         const rm = roomModel(cfg, loadLive(cfg, { date: s.sim_date, hour: s.hour }), { date: s.sim_date, hour: s.hour });
         const withLeases = rm.roomUnits(it), without = rm.roomUnits(it, false);
         if (qty > withLeases && qty <= without) throw new UserError(M("sp.err.po_collision", { item: it.item_id, qty, max: withLeases, unit: it.unit }));
+        // respect zone room: an agent order is never placed for more than the zones will hold when it arrives (manual orders are the manager's own responsibility)
+        roomUnits = withLeases;
+        if (p.status !== "MANUAL" && qty > withLeases) {
+          const step = cfg.j<Record<string, number>>("repl.round_to")[it.unit] ?? 1;
+          const fit = Math.floor(withLeases / step) * step;
+          if (fit < 1) throw new UserError(M("repl.err.no_room", { item: it.item_id, unit: it.unit }));
+          capped = qty; qty = fit;
+        }
+        // money: anything above the free budget is emergency spend, which has a limit per period (setting); above it the order is refused with a way out
+        const prem = p.emergency ? cfg.n("po.emergency_premium") : 0;
+        const orderCost = qty * it.unit_cost_omr * (1 + prem);
+        const bud = budgetInfo();
+        const extra = Math.max(0, orderCost - Math.max(0, bud.free));
+        if (extra > bud.emergencyRoom + 1e-9) {
+          const fit = Math.floor((Math.max(0, bud.free) + bud.emergencyRoom) / (it.unit_cost_omr * (1 + prem)));
+          throw new UserError(M("budget.err.over_limit", { extra, room: bud.emergencyRoom, max: fit, unit: it.unit, item: it.item_id, date: bud.nextStart }));
+        }
         const r = placePo(it, qty, { emergency: !!p.emergency, recKey: rec.key, source: "AGENT" });
+        if (extra > 1e-9) {
+          recordTopup(extra, { po: r.poId, item: it.item_id, reason: "emergency" });
+          logEvent("BUDGET_TOPUP", it.item_id, M("ev.budget_topup", { po: r.poId, amount: extra, item: it.item_id }), "high", { ref: r.poId, actor: "user" });
+        }
         ref = r.poId;
-        detail = { po: r.poId, qty, suggested: p.suggested_qty ?? p.qty, cost: r.cost, arrival: r.arrival, hour: r.hour, over_budget: r.over, cover: ctx?.cover, stockout_hours: ctx?.stockout_hours };
+        detail = { po: r.poId, qty, suggested: p.suggested_qty ?? p.qty, cost: r.cost, arrival: r.arrival, hour: r.hour, over_budget: false, emergency_spend: extra, room_units: roomUnits, capped_from: capped, manual: p.status === "MANUAL", cover: ctx?.cover, stockout_hours: ctx?.stockout_hours };
         logEvent("PO_APPROVED", it.item_id, M("ev.po_approved", { po: r.poId, qty, unit: it.unit, item: it.item_id, cost: r.cost, date: r.arrival, hour: r.hour }), "info", { ref: r.poId, actor: "user" });
-        if (r.over) logEvent("BUDGET_OVER", it.item_id, M("ev.budget_over", { po: r.poId }), "high", { ref: r.poId, actor: "user" });
         d.prepare(`UPDATE recommendations SET status='APPROVED', decided_tick=?, key=key||'#'||id, payload=? WHERE id=?`).run(s.tick, JSON.stringify({ ...p, qty, cost: r.cost, po_id: r.poId }), id);
       } else {
         detail = { cover: ctx?.cover, stockout_hours: ctx?.stockout_hours, qty: p.qty };
@@ -88,12 +110,12 @@ export function decide(id: number, decision: "APPROVED" | "REJECTED", opts: Deci
 }
 
 /** Postpone: hide the recommendation for a while (it keeps ageing, no overdue alert meanwhile). */
-export function postpone(id: number) {
+export function postpone(id: number, untilTick?: number) {
   const d = db();
   const rec = d.prepare(`SELECT * FROM recommendations WHERE id=?`).get(id) as RecRow | undefined;
   if (!rec || rec.status !== "PENDING") throw new Error("only a pending recommendation can be postponed");
   const s = getSim();
-  const hours = loadSettings().n("rec.postpone_hours");
+  const hours = untilTick !== undefined && untilTick > s.tick ? untilTick - s.tick : loadSettings().n("rec.postpone_hours");
   const p = JSON.parse(rec.payload);
   d.transaction(() => {
     d.prepare(`UPDATE recommendations SET payload=? WHERE id=?`).run(JSON.stringify({ ...p, snooze_until: s.tick + hours }), id);
@@ -117,6 +139,7 @@ export function undo(decisionId: number) {
       const po = d.prepare(`SELECT * FROM purchase_orders_open WHERE po_id=?`).get(det.po) as { status: string } | undefined;
       if (!po || po.status !== "OPEN") throw new Error("the order has already arrived or changed");
       d.prepare(`DELETE FROM purchase_orders_open WHERE po_id=?`).run(det.po);
+      removeTopup(det.po);
       const base = rec.key.replace(/#\d+$/, "");
       d.prepare(`DELETE FROM recommendations WHERE key=? AND id<>?`).run(base, rec.id);
       delete p.po_id;

@@ -7,7 +7,7 @@ const react = (what: string) => runAll({ group: `${getSim().tick}#${what}`, trig
 
 export function listWindow(i: ListInput) { const r = createListing(i); react("listing"); return r; }
 export function keepWindowVacant(i: Parameters<typeof keepVacant>[0]) { const r = keepVacant(i); react("vacant"); return r; }
-export function listingAction(id: number, action: Parameters<typeof setListingStatus>[1], area?: number) { const r = setListingStatus(id, action, area); react("listing"); return r; }
+export function listingAction(id: number, action: Parameters<typeof setListingStatus>[1], area?: number, price?: number) { const r = setListingStatus(id, action, area, price); react("listing"); return r; }
 export function offerAction(id: number, action: "accept" | "reject" | "counter", o: { reason?: string; terms?: Terms } = {}) {
   const r = action === "accept" ? acceptOffer(id) : action === "reject" ? rejectOffer(id, o.reason ?? "other") : counterOffer(id, o.terms as Terms);
   react("offer");

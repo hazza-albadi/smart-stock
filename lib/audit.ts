@@ -3,7 +3,8 @@ import { loadSettings } from "./settings";
 import { getSim } from "./core";
 import { dailyQuantity, demandMultiplier, type SeasonCfg, type EventCfg } from "./calc";
 import { snapshot } from "./snapshot";
-import { diffDays } from "./time";
+import { budgetInfo, budgetFor, periods } from "./budget";
+import { diffDays, addDays } from "./time";
 import { maxListableRaw } from "./space/forecast";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,7 +12,7 @@ import { parseCsv } from "./csv";
 
 export interface Check { name: string; ok: boolean; detail: string; flow?: "purchasing" | "space" | "both" }
 /** Checks that belong to the rental flow; every other check is purchasing (or shared stock/zone data). */
-const SPACE_CHECKS = new Set(["leased_plus_company_need_within_capacity", "listed_area_within_free_window", "income_equals_price_area_days", "no_offer_without_published_matching_listing", "space_decisions_timestamped_with_consequence", "no_offers_before_a_listing", "space_ui_matches_database"]);
+const SPACE_CHECKS = new Set(["listing_gets_minimum_offers_in_window", "leased_plus_company_need_within_capacity", "listed_area_within_free_window", "income_equals_price_area_days", "no_offer_without_published_matching_listing", "space_decisions_timestamped_with_consequence", "no_offers_before_a_listing", "space_ui_matches_database"]);
 const all = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).all(...a) as T[];
 const one = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).get(...a) as T;
 const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps * Math.max(1, Math.abs(a), Math.abs(b));
@@ -32,15 +33,37 @@ export function hourlyInvariants(): Check[] {
     .filter((r) => !near(r.q, r.e)).map((r) => `${r.item_id}: ${r.q} vs ${r.e}`));
   add("no_negative_stock", all(`SELECT lot_id, quantity_on_hand q FROM current_stock WHERE quantity_on_hand < 0`).map((r) => `${r.lot_id} ${r.q}`));
 
-  // budget
-  const b = one(`SELECT total_purchasing_budget_omr t FROM purchasing_budget LIMIT 1`);
-  const committed = one(`SELECT COALESCE(SUM(p.quantity*i.unit_cost_omr*(1+p.premium)),0) c FROM purchase_orders_open p JOIN items i ON i.item_id=p.item_id`).c;
+  // budget: a period exists for today, committed spend never exceeds the budget plus approved emergency spend, the UI shows what the tables hold
   const snap = snapshot();
-  add("budget_committed_and_free", [
-    ...(near(snap.budget.committed, committed) ? [] : [`committed ${snap.budget.committed} vs ${committed}`]),
-    ...(near(snap.kpi.budget_remaining, b.t - committed) ? [] : [`free ${snap.kpi.budget_remaining} vs ${b.t - committed}`]),
-    ...(snap.budget.over === (b.t - committed < -1e-9) ? [] : ["over-budget flag does not match the figures"]),
-  ]);
+  const bud = budgetInfo();
+  const periodsNow = periods();
+  const bd: string[] = [];
+  // (the simulation starts one day before the first period of the data; that day belongs to the first period)
+  if (snap.sim.date >= periodsNow[0].period_start && !periodsNow.some((p) => p.period_start <= snap.sim.date && snap.sim.date <= p.period_end)) bd.push(`no budget period covers ${snap.sim.date}`);
+  for (let i = 1; i < periodsNow.length; i++) if (periodsNow[i].period_start !== addDays(periodsNow[i - 1].period_end, 1)) bd.push(`gap between periods ${i} and ${i + 1}`);
+  for (const p of periodsNow) {
+    const f = budgetFor(p, periodsNow);
+    const topups = one(`SELECT COALESCE(SUM(amount),0) a FROM budget_topups WHERE period_id=?`, p.id).a;
+    if (!near(topups, p.topup)) bd.push(`period ${p.id}: top-ups ${p.topup} vs ledger ${topups}`);
+    if (f.committed > p.total_purchasing_budget_omr + p.rollover + p.topup + 1e-6) bd.push(`period ${p.period_start}: committed ${f.committed} > budget ${p.total_purchasing_budget_omr} + rollover ${p.rollover} + emergency ${p.topup}`);
+  }
+  if (!near(snap.budget.committed, bud.committed) || !near(snap.kpi.budget_remaining, bud.free)) bd.push("UI budget differs from the tables");
+  add("budget_period_exists_and_spend_within_budget_plus_emergency", bd);
+
+  // nothing runs to zero unnoticed: an item whose stock lasts less than its delivery time has an open suggestion (any funding state, incl. an emergency request),
+  // an incoming order, a recent decision of the manager (rejection cooldown) or a visible "no room" reason in the plan
+  const cooldown = loadSettings().n("repl.reject_cooldown_hours");
+  const stuck: string[] = [];
+  for (const it of snap.items) {
+    if (it.lasts_hours === null || it.lasts_hours >= it.lead_time_days * 24) continue;
+    const pending = one(`SELECT 1 FROM recommendations WHERE kind='PO' AND status='PENDING' AND item_id=?`, it.item_id);
+    const incoming = one(`SELECT 1 FROM purchase_orders_open WHERE item_id=? AND status IN ('OPEN','DELAYED_BY_SUPPLIER')`, it.item_id);
+    const rejected = one(`SELECT 1 FROM recommendations WHERE kind='PO' AND status='REJECTED' AND item_id=? AND ?-COALESCE(decided_tick,0)<?`, it.item_id, snap.sim.tick, cooldown);
+    const noRoom = one(`SELECT 1 FROM replenishment_plan WHERE item_id=? AND status='DEFERRED' AND reason LIKE '%repl.r.noroom%'`, it.item_id);
+    const overstockNow = it.status === "Overstock";
+    if (!pending && !incoming && !rejected && !noRoom && !overstockNow) stuck.push(`${it.item_id}: lasts ${Math.round(it.lasts_hours)} h, delivery ${it.lead_time_days} d, no suggestion / order / reason`);
+  }
+  add("short_stock_always_explained", stuck);
 
   // PO values keep their origin: data POs equal the CSV, approved POs equal the cost stored in the decision (receipts/splits never change the value)
   const origin: string[] = [];
@@ -120,6 +143,17 @@ export function hourlyInvariants(): Check[] {
   }
   for (const t of ["space_listings", "space_leases"]) for (const r of all(`SELECT x.id FROM ${t} x JOIN warehouse_zones w ON w.zone_id=x.zone_id WHERE w.rent_allowed<>'yes'`)) off.push(`${t} ${r.id} in a zone that is not for rent`);
   add("no_offer_without_published_matching_listing", off);
+  // reliable arrival: a reasonably priced, continuously published listing received the minimum number of offers inside the window
+  const windowH = cfg.n("space.offer_window_days") * 24;
+  const arr: string[] = [];
+  for (const l of all(`SELECT * FROM space_listings WHERE status='PUBLISHED' AND guaranteed>0 AND resumed_tick IS NULL`)) {
+    const since = l.window_tick ?? l.published_tick;
+    if (snap.sim.tick - since < windowH) continue;
+    if (one(`SELECT 1 FROM space_leases WHERE signed_tick<=?`, since + windowH)) continue; // a rental signed meanwhile may take a planned company away
+    const got = one(`SELECT COUNT(*) n FROM space_offers WHERE listing_id=? AND status<>'SCHEDULED' AND arrived_tick<=?`, l.id, since + windowH).n;
+    if (got < l.guaranteed) arr.push(`listing ${l.id}: ${got} offers in the window, ${l.guaranteed} promised`);
+  }
+  add("listing_gets_minimum_offers_in_window", arr);
   // every space decision has a timestamp and a visible consequence
   const sdc: string[] = [];
   for (const d of all(`SELECT * FROM space_decisions`)) {
@@ -150,7 +184,7 @@ export function hourlyInvariants(): Check[] {
     if (d.tick === null || d.tick === undefined) { db_.push(`decision ${d.id} has no timestamp`); continue; }
     const det = JSON.parse(d.detail ?? "{}");
     if (d.kind === "PO" && d.decision === "APPROVED" && !one(`SELECT 1 FROM purchase_orders_open WHERE po_id=?`, det.po)) db_.push(`decision ${d.id}: PO ${det.po} missing`);
-    if (d.kind === "PO" && d.decision === "REJECTED" && one(`SELECT status FROM recommendations WHERE id=?`, d.rec_id)?.status === "APPROVED") db_.push(`decision ${d.id}: rejected but approved`);
+    if (d.kind === "PO" && d.decision === "REJECTED" && (() => { const r = one(`SELECT status, reopen_count FROM recommendations WHERE id=?`, d.rec_id); return r?.status === "APPROVED" && !r.reopen_count; })()) db_.push(`decision ${d.id}: rejected but approved`);
     if (d.kind === "SUPPLIER_MSG" && det.effect !== "none") db_.push(`decision ${d.id}: message decision without explicit no-effect`);
   }
   add("decisions_timestamped_with_consequence", db_);
@@ -198,7 +232,8 @@ export function dailyInvariants(): Check[] {
   add("hourly_amounts_sum_to_daily_quantity", [...bad, ...(profileSum > 0 ? [] : ["hourly profile sums to zero"])]);
   add("issued_demand_equals_movements", bad2);
   // replenishment caps orders by room: agent POs must arrive in full (no held remainder / blocked receipt)
-  add("agent_pos_arrive_fully", all(`SELECT e.type, e.ref FROM events e JOIN purchase_orders_open p ON p.po_id=REPLACE(e.ref, '', '') WHERE e.type IN ('PO_HELD','RECEIVING_BLOCKED') AND p.source='AGENT' AND p.emergency=0`).map((r) => `${r.type} ${r.ref}`));
+  // zone room is respected when an order is placed: an approved agent order never exceeds the room its zones had for it (later holds are visible "no space" events, not silent)
+  add("agent_pos_fit_when_placed", all(`SELECT id, detail FROM decisions WHERE kind='PO' AND decision='APPROVED'`).filter((r) => { const x = JSON.parse(r.detail); return !x.manual && x.room_units !== undefined && x.room_units !== null && x.qty > x.room_units + 1e-9; }).map((r) => `decision ${r.id}`));
   add("planned_never_below_issued", all(`SELECT day, item_id, hour FROM demand_log WHERE issued > planned`).map((r) => `${r.item_id} d${r.day} h${r.hour}`));
   return out;
 }

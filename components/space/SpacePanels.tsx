@@ -1,8 +1,9 @@
 "use client";
-import { memo } from "react";
+import { memo, useMemo, useState } from "react";
 import { useSnap } from "@/lib/store";
 import { useApp, useBusy } from "../ctx";
 import { Btn, CardHead, Empty, ExplainBtn, Pill } from "../ui";
+import { CounterDialog, RejectDialog } from "./SpaceDialogs";
 
 type Listing = ReturnType<typeof useListings>[number];
 const useListings = () => useSnap((s) => s.space.listings);
@@ -16,6 +17,7 @@ const ListingRow = memo(function ListingRow({ l }: { l: Listing }) {
   const { T, R, D, spaceAct, confirm } = useApp();
   const busy = useBusy();
   const warn = useSnap((s) => s.space.po_warnings.find((w) => w.listing_id === l.id));
+  const windowDays = useSnap((s) => s.space.settings.offer_window_days);
   const act = (action: string, msg: string) => spaceAct(`/api/space/listings/${l.id}`, { action }, { k: msg, v: { zone: l.zone_id, area: l.rest } });
   const open = ["DRAFT", "PUBLISHED", "PAUSED"].includes(l.status);
   return (
@@ -29,6 +31,7 @@ const ListingRow = memo(function ListingRow({ l }: { l: Listing }) {
         {l.leased > 0 && <> · {R({ k: "sp.list.leased", v: { leased: l.leased, rest: l.rest } })}</>}
         {l.offers_pending > 0 && <> · <strong className="text-info">{R({ k: "sp.list.offers", v: { n: l.offers_pending } })}</strong></>}
       </div>
+      {l.status === "PUBLISHED" && l.offers_total === 0 && <p className="mt-1 rounded-md bg-surface2 px-2 py-1 text-xs text-muted">{l.price_note === "high" ? T("sp.list.why_high") : R({ k: "sp.list.waiting", v: { days: windowDays } })}</p>}
       {warn && <p className="mt-1 rounded-md bg-mon-soft px-2 py-1 text-xs">▲ {R({ k: "sp.list.po_warn", v: { short: warn.short, item: warn.item_id, date: warn.arrival } })}</p>}
       {open && (
         <div className="mt-2 flex flex-wrap gap-2">
@@ -80,6 +83,50 @@ export function ListingsPanel() {
           </ul>
         </div>
       </div>
+    </section>
+  );
+}
+
+/** Offers side by side: what each one brings in, how long, how well it fits the free window, and the risk of a conflict with our own orders. */
+export function ComparePanel() {
+  const { T, R, D, N, OMR, spaceAct } = useApp();
+  const busy = useBusy();
+  const all = useOffers();
+  const [dlg, setDlg] = useState<{ kind: "counter" | "reject"; o: Offer } | null>(null);
+  const rows = useMemo(() => all.filter((o) => o.status === "PENDING").sort((a, b) => Number(!!b.eval?.can_accept) - Number(!!a.eval?.can_accept) || b.compare.total - a.compare.total), [all]);
+  if (rows.length < 2) return null;
+  const best = rows[0].eval?.can_accept ? rows[0].id : -1; // the best offer that can be accepted now
+  return (
+    <section id="compare" className="card scroll-mt-24" aria-label={T("sp.cmp.title")}>
+      <CardHead title={T("sp.cmp.title")} sub={T("sp.cmp.sub")} />
+      <div className="scroll-thin max-h-[300px] overflow-auto">
+        <table className="w-full min-w-[860px] border-collapse text-sm">
+          <thead className="sticky top-0 bg-surface2 text-xs text-muted"><tr>{["company", "area", "start", "length", "price", "monthly", "total", "fit", "risk", ""].map((k) => <th key={k} scope="col" className="px-3 py-2 text-start font-semibold">{k ? T(`sp.cmp.${k}`) : <span className="sr-only">{T("sp.cmp.actions")}</span>}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((o) => (
+              <tr key={o.id} className={`border-t border-line align-top ${o.id === best ? "bg-ok-soft/40" : ""}`}>
+                <td className="px-3 py-2 font-semibold">{o.company}{o.id === best && <Pill tone="OK">{T("sp.cmp.best")}</Pill>}</td>
+                <td className="tabular-nums px-3 py-2">{R({ k: "sp.cmp.m2", v: { n: o.area } })}</td>
+                <td className="tabular-nums px-3 py-2">{D(o.start_date)}</td>
+                <td className="tabular-nums px-3 py-2">{R({ k: "sp.cmp.months", v: { n: o.compare.months } })}</td>
+                <td className="tabular-nums px-3 py-2">{OMR(o.price)} <span className={`text-xs ${o.price >= o.listing_price ? "text-ok" : "text-high"}`}>{o.price > o.listing_price ? "▲" : o.price < o.listing_price ? "▼" : "="}</span></td>
+                <td className="tabular-nums px-3 py-2 font-semibold">{OMR(o.compare.monthly)}</td>
+                <td className="tabular-nums px-3 py-2 font-semibold">{OMR(o.compare.total)}</td>
+                <td className="px-3 py-2 text-xs">{T(`sp.cmp.fit_${o.compare.fit_dates}`)} · {T(`sp.cmp.fit_${o.compare.fit_area}`)}</td>
+                <td className="px-3 py-2"><Pill tone={o.compare.risk === "blocked" ? "Critical" : o.compare.risk === "watch" ? "Monitor" : "OK"}>{T(`sp.cmp.risk_${o.compare.risk}`)}</Pill></td>
+                <td className="px-3 py-2"><span className="flex flex-wrap gap-1.5">
+                  <Btn tone="ok" disabled={busy || !o.eval?.can_accept} title={o.eval?.can_accept ? undefined : T("sp.offer.cant_accept")} onClick={() => spaceAct(`/api/space/offers/${o.id}`, { action: "accept" }, { k: "toast.sp.accepted", v: { company: o.company, area: o.area, zone: o.zone_id } })}>{T("sp.btn.accept")}</Btn>
+                  <Btn disabled={busy} onClick={() => setDlg({ kind: "counter", o })}>{T("sp.btn.counter")}</Btn>
+                  <Btn tone="bad" disabled={busy} onClick={() => setDlg({ kind: "reject", o })}>{T("sp.btn.reject")}</Btn>
+                </span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {dlg?.kind === "counter" && <CounterDialog o={dlg.o} onClose={() => setDlg(null)} />}
+      {dlg?.kind === "reject" && <RejectDialog o={dlg.o} onClose={() => setDlg(null)} />}
+      <span className="sr-only">{N(rows.length)}</span>
     </section>
   );
 }

@@ -544,9 +544,9 @@
   },
   {
     "key": "space.offer_base_prob",
-    "value": 0.85,
+    "value": 0.35,
     "unit": "ratio",
-    "description": "Chance that a matching company sends an offer at a market price."
+    "description": "Chance that another matching company (beyond the guaranteed minimum) sends an offer at a market price."
   },
   {
     "key": "space.offer_delay_min_h",
@@ -644,5 +644,159 @@
     "value": false,
     "unit": "bool",
     "description": "Priority 3: purchase suggestions nobody approved yet only warn (off). On: they also block listing the space they would need."
+  },
+  {
+    "key": "budget.period_days",
+    "value": 28,
+    "unit": "days",
+    "description": "Length of a budget period (4 weeks, like the first period in the data). A new period starts automatically when one ends."
+  },
+  {
+    "key": "budget.renewal_amount",
+    "value": 0,
+    "unit": "OMR",
+    "description": "Budget of every renewed period. 0 = the same amount as the first period of the data."
+  },
+  {
+    "key": "budget.rollover_pct",
+    "value": 0,
+    "unit": "pct",
+    "description": "Share of the unspent money that moves into the next period (0 = none, 100 = all)."
+  },
+  {
+    "key": "budget.carry_commitments",
+    "value": true,
+    "unit": "bool",
+    "description": "Orders placed earlier and not received yet keep counting against the next period (cash-flow view)."
+  },
+  {
+    "key": "budget.emergency_limit_pct",
+    "value": 15,
+    "unit": "pct",
+    "description": "Most emergency spend the manager can approve per period, as a share of the period budget."
+  },
+  {
+    "key": "budget.emergency_horizon_days",
+    "value": 14,
+    "unit": "days",
+    "description": "A critical (class A) item is an emergency when it runs out within its delivery time plus this many days."
+  },
+  {
+    "key": "budget.low_pct",
+    "value": 15,
+    "unit": "pct",
+    "description": "A 'budget is low' alert is raised when the free budget falls below this share of the period budget."
+  },
+  {
+    "key": "space.pool_extra_count",
+    "value": 12,
+    "unit": "int",
+    "description": "Number of extra SIMULATED companies added to the tenant pool next to the CSV requests (made-up names, areas and prices)."
+  },
+  {
+    "key": "space.pool_area_min",
+    "value": 100,
+    "unit": "m2",
+    "description": "Smallest area a simulated company asks for."
+  },
+  {
+    "key": "space.pool_area_max",
+    "value": 900,
+    "unit": "m2",
+    "description": "Largest area a simulated company asks for."
+  },
+  {
+    "key": "space.pool_months_min",
+    "value": 1,
+    "unit": "int",
+    "description": "Shortest rental a simulated company wants, in months."
+  },
+  {
+    "key": "space.pool_months_max",
+    "value": 12,
+    "unit": "int",
+    "description": "Longest rental a simulated company wants, in months."
+  },
+  {
+    "key": "space.pool_start_min_days",
+    "value": 5,
+    "unit": "days",
+    "description": "Earliest start of a simulated company's need, in days after the simulation starts."
+  },
+  {
+    "key": "space.pool_start_max_days",
+    "value": 90,
+    "unit": "days",
+    "description": "Latest start of a simulated company's need, in days after the simulation starts."
+  },
+  {
+    "key": "space.pool_factor_min",
+    "value": 0.85,
+    "unit": "ratio",
+    "description": "Lowest price a simulated company is willing to pay, as a share of the market price (price sensitivity)."
+  },
+  {
+    "key": "space.pool_factor_max",
+    "value": 1.35,
+    "unit": "ratio",
+    "description": "Highest price a simulated company is willing to pay, as a share of the market price (price sensitivity)."
+  },
+  {
+    "key": "space.pool_protected_share_pct",
+    "value": 15,
+    "unit": "pct",
+    "description": "Share of the simulated companies that ask for storage that is never rented out (cold, hazardous): they are shown as demand we cannot serve."
+  },
+  {
+    "key": "space.pool_names_a",
+    "value": [
+      "Al Wadi",
+      "Gulf Star",
+      "Nizwa",
+      "Salalah",
+      "Sur Coast",
+      "Muscat Bay",
+      "Dhofar",
+      "Batinah",
+      "Sharqiya",
+      "Hajar",
+      "Oman Pearl",
+      "Khareef"
+    ],
+    "unit": "json",
+    "description": "First part of the made-up names of simulated companies."
+  },
+  {
+    "key": "space.pool_names_b",
+    "value": [
+      "Trading",
+      "Logistics",
+      "Packaging",
+      "Retail",
+      "Foods",
+      "Supplies",
+      "Distribution",
+      "Industries"
+    ],
+    "unit": "json",
+    "description": "Second part of the made-up names of simulated companies."
+  },
+  {
+    "key": "space.offer_min_count",
+    "value": 2,
+    "unit": "int",
+    "description": "A published listing at a reasonable price gets at least this many offers within the window."
+  },
+  {
+    "key": "space.offer_window_days",
+    "value": 3,
+    "unit": "days",
+    "description": "The window (simulated days after publishing) in which the minimum number of offers arrives."
+  },
+  {
+    "key": "space.min_bid_ratio",
+    "value": 0.7,
+    "unit": "ratio",
+    "description": "A company only makes an offer when what it is willing to pay is at least this share of the asking price."
   }
 ]

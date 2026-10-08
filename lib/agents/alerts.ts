@@ -4,6 +4,7 @@ import { getSim, logRun, logEvent, upsertRec, M, type AgentResult, type Item, ty
 import { loadSettings } from "../settings";
 import { loadLive } from "../live";
 import { coverHours } from "../calc";
+import { budgetInfo } from "../budget";
 import { computeZones } from "../zones";
 
 const SEV_ORDER: Severity[] = ["Critical", "High", "Monitor", "Info"];
@@ -191,8 +192,43 @@ export function alertAgent(group: string, trigger: string): AgentResult {
     });
   }
 
+  // --- budget: low money, and critical items that cannot be funded (the exact consequence and date) ---
+  const bud = budgetInfo();
+  const unfunded = (d.prepare(`SELECT key, item_id, payload FROM recommendations WHERE kind='PO' AND status='PENDING'`).all() as { key: string; item_id: string; payload: string }[])
+    .map((r) => ({ ...r, p: JSON.parse(r.payload) })).filter((r) => r.p.funding === "NEEDS_EXTRA" || r.p.funding === "DEFERRED");
+  if (bud.free < bud.lowLimit) {
+    alerts.push({
+      key: "BUDGET_LOW", kind: "BUDGET_LOW", item_id: null, severity: bud.free <= 0 ? "High" : "Monitor",
+      title: M("alert.budget_low.title", { left: Math.max(0, bud.free), date: bud.nextStart, days: bud.daysLeft }),
+      detail: [M("alert.budget_low.d1", { waiting: unfunded.length, critical: unfunded.filter((r) => r.p.funding === "NEEDS_EXTRA").length, date: bud.nextStart, amount: bud.nextAmount, room: bud.emergencyRoom })],
+      ignore: M("alert.budget_low.ignore", { date: bud.nextStart }),
+    });
+  }
+  for (const r of unfunded.filter((x) => x.p.funding === "NEEDS_EXTRA")) {
+    const so = r.p.stockout as { hours: number; date: string } | null;
+    const info = r.p.funding_info ?? {};
+    alerts.push({
+      key: `UNFUNDED:${r.item_id}`, kind: "UNFUNDED_CRITICAL", item_id: r.item_id, severity: so && so.hours < 72 ? "Critical" : "High",
+      title: M("alert.unfunded.title", { item: r.item_id, date: so?.date ?? "", hours: so?.hours ?? 0 }),
+      detail: [M("alert.unfunded.d1", { cost: r.p.cost, left: info.free ?? 0, extra: info.extra ?? 0, room: info.emergency_room ?? 0, within: info.within_limit ? 1 : 0, date: bud.nextStart })],
+      ignore: M("alert.unfunded.ignore", { item: r.item_id, date: so?.date ?? "", hours: so?.hours ?? 0 }),
+    });
+  }
+
+  // --- an item that needs an order but whose zones cannot take it: never a silent zero (the plan says why, and so does an alert) ---
+  for (const r of d.prepare(`SELECT item_id, qty, reason FROM replenishment_plan WHERE status='DEFERRED' AND reason LIKE '%repl.r.noroom%'`).all() as { item_id: string; qty: number; reason: string }[]) {
+    const l = live.get(r.item_id);
+    if (!l || l.item.lead_time_days * 24 <= (coverHours(l.onHand, l.weeklyUsage) ?? Infinity)) continue; // only when the stock really lasts less than the delivery time
+    alerts.push({
+      key: `NO_ROOM:${r.item_id}`, kind: "NO_ROOM", item_id: r.item_id, severity: l.onHand <= 0 ? "Critical" : "High",
+      title: M("alert.no_room.title", { item: r.item_id, zone: l.item.zone_id }),
+      detail: [M("alert.no_room.d1", { qty: r.qty, unit: l.item.unit, item: r.item_id, zone: l.item.zone_id, overflow: cfg.s("space.overflow_zone") })],
+      ignore: M("alert.no_room.ignore", { item: r.item_id }),
+    });
+  }
+
   // ---- persist alerts (new / escalated ones also become events) ----
-  const existing = new Map((d.prepare(`SELECT key, severity, active FROM alerts WHERE kind NOT IN ('LISTING_RISK','LEASE_OVER')`).all() as { key: string; severity: string; active: number }[]).map((r) => [r.key, r]));
+  const existing = new Map((d.prepare(`SELECT key, severity, active FROM alerts WHERE kind NOT IN ('LISTING_RISK','LEASE_OVER','NO_OFFERS')`).all() as { key: string; severity: string; active: number }[]).map((r) => [r.key, r]));
   const seen = new Set<string>();
   let newCount = 0;
   const st = { ins: d.prepare(`INSERT INTO alerts(key,kind,item_id,severity,title,detail,ignore_msg,rec_key,active,first_tick,updated_tick,flow) VALUES(?,?,?,?,?,?,?,?,1,?,?,?)`),

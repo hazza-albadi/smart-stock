@@ -5,7 +5,7 @@ import FeedPanel, { type FeedMove } from "../FeedPanel";
 import { RiskList } from "../RiskPanel";
 import { ExplainBtn } from "../ui";
 import SpaceQueue from "./SpaceQueue";
-import { ForecastPanel, LeasesPanel, ListingsPanel, UnmatchedPanel } from "./SpacePanels";
+import { ComparePanel, ForecastPanel, LeasesPanel, ListingsPanel, UnmatchedPanel } from "./SpacePanels";
 
 const STEPS = ["forecast", "decide", "listing", "offers", "leases"] as const;
 
@@ -69,6 +69,7 @@ export default function SpaceView({ feed, onMore, moreLeft }: { feed: FeedMove[]
         <div className="min-w-0 lg:col-span-7"><SpaceQueue /></div>
         <div className="min-w-0 space-y-4 lg:col-span-5"><SpaceKpis /><RiskList flow="space" /></div>
       </div>
+      <ComparePanel />
       <ListingsPanel />
       <LeasesPanel />
       <ForecastPanel />

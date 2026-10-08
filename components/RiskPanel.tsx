@@ -5,22 +5,23 @@ import { useApp } from "./ctx";
 import { Empty, ExplainBtn, SevPill, STRIPE } from "./ui";
 
 export function KpiStrip() {
-  const { T, N, OMR, goTab } = useApp();
+  const { T, N, OMR, D, goTab } = useApp();
   const k = useSnap((s) => s.kpi), ex = useSnap((s) => s.kpi_explain), total = useSnap((s) => s.budget.total);
   const cards = [
     { id: "risk", label: T("kpi.risk"), value: N(k.items_at_risk), sub: T("kpi.risk_sub"), tone: k.items_at_risk > 0 ? "text-crit" : "text-ok", go: () => document.getElementById("risks")?.scrollIntoView({ behavior: "smooth" }), e: ex.risk },
-    { id: "budget", label: T("kpi.budget"), value: OMR(k.budget_remaining), sub: `${T("kpi.budget_sub")} ${OMR(total)}${k.over_budget ? " · " + T("overBudget") : ""}`, tone: k.over_budget ? "text-crit" : "text-brand", go: () => goTab("plan"), e: ex.budget },
+    { id: "budget", label: T("kpi.budget"), value: OMR(k.budget_remaining), sub: `${T("kpi.budget_sub")} ${OMR(total)} · ${T("kpi.budget_renews")} ${D(k.budget_renews)} (${N(k.budget_days_left)} ${T("days")})`, sub2: k.emergency_spend > 0 ? `${T("kpi.emergency")} ${OMR(k.emergency_spend)}` : "", tone: k.over_budget ? "text-crit" : "text-brand", go: () => goTab("plan"), e: ex.budget },
     { id: "orders", label: T("kpi.orders"), value: N(k.po_open), sub: T("kpi.orders_sub"), tone: "text-brand", go: () => goTab("plan"), e: ex.orders },
     { id: "pending", label: T("kpi.pending"), value: N(k.pending), sub: T("kpi.pending_sub"), tone: k.pending > 0 ? "text-high" : "text-ok", go: () => document.getElementById("decisions")?.scrollIntoView({ behavior: "smooth" }), e: ex.pending },
   ];
   return (
     <section className="grid grid-cols-2 gap-3" aria-label={T("kpi.title")}>
       {cards.map((c) => (
-        <div key={c.id} className="card min-h-[112px] p-4">
+        <div key={c.id} className="card min-h-[136px] p-4">
           <div className="flex items-center text-sm font-medium text-muted">{c.label}<ExplainBtn e={c.e} /></div>
           <button type="button" onClick={c.go} className="mt-1 block w-full text-start">
             <div className={`num kpi-value text-xl font-bold leading-tight xl:text-2xl ${c.tone}`}>{c.value}</div>
             <div className="mt-1 text-sm text-muted">{c.sub}</div>
+            {"sub2" in c && c.sub2 ? <div className="text-sm font-semibold text-high">{c.sub2 as string}</div> : null}
           </button>
         </div>
       ))}

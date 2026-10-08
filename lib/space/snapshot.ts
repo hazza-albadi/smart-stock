@@ -2,7 +2,7 @@ import { db } from "../db";
 import { getSim, type Msg } from "../core";
 import { loadSettings } from "../settings";
 import { dailyIncome, ex, type Explain } from "../calc";
-import { evaluateOffer, listingRest, unmatchedDemand, type Lease, type Listing, type Offer } from "./market";
+import { evaluateOffer, listingAdvice, listingRest, reasonablePrice, unmatchedDemand, type Lease, type Listing, type Offer } from "./market";
 import { projectZones } from "./forecast";
 import { addDays, addMonths, diffDays } from "../time";
 
@@ -38,13 +38,14 @@ export function spaceSnapshot() {
   const poWarnings = fc.filter((r) => r.state === "WARN").map((r) => ({ listing_id: r.inputs.listing_id as number, zone_id: r.zone_id, from: r.start_date, to: r.end_date, short: r.area, rest: r.inputs.rest as number, item_id: r.inputs.draft.item_id as string, qty: r.inputs.draft.qty as number, area: r.inputs.draft.area as number, arrival: r.inputs.draft.arrival as string }));
 
   const lstRows = all<Listing>(`SELECT * FROM space_listings ORDER BY id DESC`);
-  const offersRaw = all<Offer>(`SELECT * FROM space_offers ORDER BY id DESC`);
+  const offersRaw = all<Offer>(`SELECT * FROM space_offers WHERE status<>'SCHEDULED' ORDER BY id DESC`); // planned offers stay invisible until their hour
   const projByListing = new Map<number, ReturnType<typeof projectZones>>();
   const listings = lstRows.map((l) => {
     const rest = listingRest(l);
     const mine = offersRaw.filter((o) => o.listing_id === l.id);
-    return { ...l, zone_name: zoneName.get(l.zone_id) ?? l.zone_id, rest, leased: l.area - rest, offers_pending: mine.filter((o) => o.status === "PENDING").length, offers_total: mine.length, per_day_if_leased: dailyIncome(l.area, l.price, dpm) };
+    return { ...l, zone_name: zoneName.get(l.zone_id) ?? l.zone_id, rest, leased: l.area - rest, offers_pending: mine.filter((o) => o.status === "PENDING").length, offers_total: mine.length, per_day_if_leased: dailyIncome(l.area, l.price, dpm), price_note: (reasonablePrice(cfg, l.price) ? "ok" : "high") as "ok" | "high", waiting_since: sim.tick - (l.window_tick ?? l.published_tick ?? sim.tick) };
   });
+  const poWarn = new Set(poWarnings.map((w) => w.listing_id));
   const lstById = new Map(lstRows.map((l) => [l.id, l]));
   const offers = offersRaw.map((o) => {
     const l = lstById.get(o.listing_id) as Listing;
@@ -54,7 +55,16 @@ export function spaceSnapshot() {
       evalr = evaluateOffer(cfg, o, l, projByListing.get(l.id));
     }
     return { ...o, zone_id: l.zone_id, listing_price: l.price, listing_start: l.start_date, listing_end: l.end_date, counter: o.counter ? JSON.parse(o.counter) : null, eval: evalr, age_hours: sim.tick - o.arrived_tick, expires_in: o.valid_until_tick - sim.tick,
-      per_day: dailyIncome(o.area, o.price, dpm) };
+      per_day: dailyIncome(o.area, o.price, dpm),
+      compare: (() => {
+        const days = Math.max(0, Math.round((Date.parse(o.end_date) - Date.parse(o.start_date)) / 86400000));
+        const needs = evalr?.checks.find((c) => c.key === "needs")?.level;
+        const risk = !evalr ? "none" : needs === "bad" ? "blocked" : l.zone_id && poWarn.has(l.id) ? "watch" : "none";
+        return {
+          monthly: o.area * o.price, days, months: days / dpm, total: dailyIncome(o.area, o.price, dpm) * days,
+          fit_dates: o.start_date >= l.start_date && o.end_date <= l.end_date ? "inside" : "partly", fit_area: o.area <= listingRest(l) + 1e-6 ? "fits" : "too_big", risk,
+        };
+      })() };
   });
   const leases = all<Lease>(`SELECT * FROM space_leases ORDER BY status='ENDED', start_date, id`).map((l) => ({ ...l, zone_name: zoneName.get(l.zone_id) ?? l.zone_id, per_day: dailyIncome(l.area, l.price, dpm), total: dailyIncome(l.area, l.price, dpm) * Math.max(1, Math.round((Date.parse(l.end_date) - Date.parse(l.start_date)) / 86400000)) }));
 
@@ -62,7 +72,8 @@ export function spaceSnapshot() {
   const income = leases.reduce((a, l) => a + l.income, 0);
   const newWindows = windows.filter((w) => w.state === "NEW");
   const pendingOffers = offers.filter((o) => o.status === "PENDING");
-  const queue = newWindows.length + pendingOffers.length + conflicts.length;
+  const advice = listingAdvice(cfg);
+  const queue = newWindows.length + pendingOffers.length + conflicts.length + advice.length;
   const ages = [...newWindows.map((w) => sim.tick - w.since_tick), ...pendingOffers.map((o) => o.age_hours), ...conflicts.map((c) => sim.tick - c.since_tick)];
   const published = listings.filter((l) => l.status === "PUBLISHED" || l.status === "PAUSED");
   const kpi = {
@@ -86,9 +97,9 @@ export function spaceSnapshot() {
   return {
     settings: {
       price_suggested: cfg.n("space.price_suggested"), price_market: cfg.n("space.price_market"), band_pct: cfg.n("space.price_band_pct"), margin_pct: cfg.n("space.safety_margin_pct"),
-      min_block: cfg.n("space.min_block_m2"), min_days: cfg.n("space.min_lease_days"), step: cfg.n("space.area_step_m2"), reeval_days: cfg.n("space.reeval_days"), reeval_date: addDays(sim.sim_date, cfg.n("space.reeval_days")), forecast_days: cfg.n("space.forecast_days"), days_per_month: dpm,
+      min_block: cfg.n("space.min_block_m2"), min_days: cfg.n("space.min_lease_days"), step: cfg.n("space.area_step_m2"), reeval_days: cfg.n("space.reeval_days"), reeval_date: addDays(sim.sim_date, cfg.n("space.reeval_days")), forecast_days: cfg.n("space.forecast_days"), days_per_month: dpm, offer_min_count: cfg.n("space.offer_min_count"), offer_window_days: cfg.n("space.offer_window_days"), pool_total: (all(`SELECT COUNT(*) n FROM space_requests`)[0]?.n as number) ?? 0,
     },
-    zones, windows, blocked, conflicts, po_warnings: poWarnings, listings, offers, leases, unmatched, kpi, kpi_explain: explain, flow, next,
+    zones, windows, blocked, conflicts, po_warnings: poWarnings, advice, listings, offers, leases, unmatched, kpi, kpi_explain: explain, flow, next,
   };
 }
 export type SpaceSnapshot = ReturnType<typeof spaceSnapshot>;

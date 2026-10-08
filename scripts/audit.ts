@@ -37,6 +37,8 @@ function scriptedActions(tick_: number) {
   const item = (d.prepare(`SELECT item_id FROM items ORDER BY item_id LIMIT 1 OFFSET 3`).get() as { item_id: string }).item_id;
   const safe = (fn: () => unknown) => { try { fn(); } catch { /* an action may legitimately be refused (e.g. space gone) */ } };
   if (hour !== 9) return;
+  // the manager keeps deciding: every pending order is approved (emergency spend only within its limit), so budgets are really used up and renewed
+  if (day >= 3) for (const r of pending("PO")) safe(() => decide(r.id, "APPROVED"));
   if (day === 1) { const p = pending("PO"); if (p[0]) safe(() => decide(p[0].id, "APPROVED")); if (p[1]) safe(() => decide(p[1].id, "REJECTED")); }
   if (day === 2) { const m = pending("SUPPLIER_MSG"); if (m[0]) safe(() => decide(m[0].id, "APPROVED")); }
   spaceActions(day);

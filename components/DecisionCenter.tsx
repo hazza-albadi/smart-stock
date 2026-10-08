@@ -10,18 +10,23 @@ const useRecs = () => useSnap((s) => s.recs);
 
 /** One recommendation as a card: what, when, why, what to do (one main button), what happens after, what happens if ignored. */
 const DecisionCard = memo(function DecisionCard({ rec, ignoreMsg, postponeHours }: { rec: Rec; ignoreMsg: any; postponeHours: number }) {
-  const { T, R, N, DT, DUR, name, decide, postpone } = useApp();
+  const { T, R, N, D, DT, DUR, name, decide, postpone, editQty } = useApp();
   const busy = useBusy();
   const [more, setMore] = useState(false);
   const p = rec.payload;
   let title = "", why = "", after = "", ignore = "", primary = "", reject = T("dc.reject"), kindLabel = T(`kind.${rec.kind}`);
   const warn = useSnap((s) => s.space.po_warnings.find((w) => rec.kind === "PO" && w.item_id === rec.item_id));
+  const fund: string = p.funding ?? "FUNDED", fi = p.funding_info ?? null;
+  const emergency = rec.kind === "PO" && fund === "NEEDS_EXTRA", deferred = rec.kind === "PO" && fund === "DEFERRED";
   if (rec.kind === "PO") {
-    title = R({ k: "dc.po.title", v: { qty: p.qty, unit: p.unit, item: rec.item_id } });
+    title = R({ k: emergency ? "dc.emerg.title" : "dc.po.title", v: { qty: p.qty, unit: p.unit, item: rec.item_id } });
     why = R(p.reason);
-    after = R({ k: "dc.po.after", v: { date: p.expected_arrival, cost: p.cost } });
-    ignore = ignoreMsg ? R(ignoreMsg) : R({ k: "dc.po.ignore" });
-    primary = R({ k: "dc.po.approve", v: { qty: p.qty, unit: p.unit, cost: p.cost } });
+    after = emergency ? R({ k: "dc.emerg.after", v: { extra: fi?.extra ?? 0, cost: p.cost, date: p.expected_arrival } })
+      : deferred ? R({ k: "dc.defer.after", v: { date: fi?.renewal_date ?? "", cost: p.cost } }) : R({ k: "dc.po.after", v: { date: p.expected_arrival, cost: p.cost } });
+    ignore = emergency ? R({ k: p.stockout ? "dc.emerg.ignore" : "dc.emerg.ignore_nodate", v: { item: rec.item_id, date: p.stockout?.date ?? "", hours: p.stockout?.hours ?? 0 } })
+      : ignoreMsg ? R(ignoreMsg) : R({ k: "dc.po.ignore" });
+    primary = emergency ? R({ k: "dc.emerg.approve", v: { amount: fi?.extra ?? 0 } }) : deferred ? R({ k: "dc.defer.wait", v: { date: fi?.renewal_date ?? "" } })
+      : R({ k: "dc.po.approve", v: { qty: p.qty, unit: p.unit, cost: p.cost } });
   } else if (rec.kind === "SUPPLIER_MSG") {
     title = R({ k: "dc.msg.title", v: { supplier: p.supplier_name, item: rec.item_id } });
     why = R(p.subject);
@@ -32,7 +37,8 @@ const DecisionCard = memo(function DecisionCard({ rec, ignoreMsg, postponeHours 
   return (
     <li className={`rounded-xl border bg-surface p-3.5 ${rec.overdue ? "border-high" : "border-line"}`}>
       <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-        <Pill tone={rec.kind === "PO" ? "Info" : "Monitor"} icon={false}>{kindLabel}</Pill>
+        <Pill tone={emergency ? "Critical" : rec.kind === "PO" ? "Info" : "Monitor"} icon={emergency}>{emergency ? T("fund.NEEDS_EXTRA") : kindLabel}</Pill>
+        {rec.kind === "PO" && fund !== "FUNDED" && !emergency && <Pill tone={fund === "DEFERRED" ? "High" : "Monitor"}>{T(`fund.${fund}`)}{fund === "DEFERRED" && fi?.renewal_date ? <> · <span className="num">{D(fi.renewal_date)}</span></> : null}</Pill>}
         {rec.source === "manual" && <Pill tone="user" icon={false}>{T("you")}</Pill>}
         {rec.reopen_count > 0 && <Pill tone="High">{T("dc.back")}</Pill>}
         {rec.overdue && <Pill tone="Critical">{T("dc.overdue")}</Pill>}
@@ -46,9 +52,13 @@ const DecisionCard = memo(function DecisionCard({ rec, ignoreMsg, postponeHours 
         <div className="rounded-md bg-high-soft/60 px-2 py-1"><dt className="inline font-semibold text-high">{T("dc.ignore")}: </dt><dd className="inline">{ignore}</dd></div>
       </dl>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Btn tone="ok" size="lg" disabled={busy} className="grow sm:grow-0" onClick={() => decide(rec.id, "APPROVED")}>{primary}</Btn>
+        {deferred
+          ? <Btn tone="primary" size="lg" disabled={busy} className="grow sm:grow-0" onClick={() => postpone(rec.id, fi?.renewal_tick)}>{primary}</Btn>
+          : <Btn tone={emergency ? "bad" : "ok"} size="lg" disabled={busy || (emergency && !fi?.within_limit)} className="grow sm:grow-0" title={emergency && !fi?.within_limit ? T("dc.emerg.limit_hint") : undefined} onClick={() => decide(rec.id, "APPROVED")}>{primary}</Btn>}
+        {emergency && fi?.max_qty_in_limit > 0 && fi.max_qty_in_limit < p.qty && <Btn disabled={busy} onClick={() => editQty(rec.id, fi.max_qty_in_limit)}>{R({ k: "dc.emerg.reduce", v: { qty: fi.max_qty_in_limit, unit: p.unit, cost: fi.max_cost_in_limit } })}</Btn>}
+        {(emergency || deferred) && fi?.small_qty > 0 && fi.small_qty < p.qty && <Btn disabled={busy} onClick={() => decide(rec.id, "APPROVED", { qty: fi.small_qty })}>{R({ k: "dc.fund.small", v: { qty: fi.small_qty, unit: p.unit, cost: fi.small_cost } })}</Btn>}
         <Btn tone="bad" disabled={busy} onClick={() => decide(rec.id, "REJECTED")}>{reject}</Btn>
-        <Btn disabled={busy} onClick={() => postpone(rec.id)} title={T("dc.postpone_hint")}>{R({ k: "dc.postpone", v: { hours: postponeHours } })}</Btn>
+        {!deferred && !emergency && <Btn disabled={busy} onClick={() => postpone(rec.id)} title={T("dc.postpone_hint")}>{R({ k: "dc.postpone", v: { hours: postponeHours } })}</Btn>}
         {(rec.kind === "PO" || rec.kind === "SUPPLIER_MSG") && (
           <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more} className="min-h-10 px-2 text-sm font-semibold text-brand hover:underline">
             {more ? T("dc.less") : T("dc.details")}
@@ -61,6 +71,7 @@ const DecisionCard = memo(function DecisionCard({ rec, ignoreMsg, postponeHours 
         </div>
       )}
       {more && rec.kind === "SUPPLIER_MSG" && <SupplierMessage payload={p} />}
+      {(emergency || deferred) && fi?.alt_item && <p className="mt-2 rounded-md bg-surface2 px-2 py-1 text-sm text-muted">{R({ k: "dc.fund.alt", v: { item: fi.alt_item } })}</p>}
     </li>
   );
 });
@@ -73,7 +84,7 @@ export default function DecisionCenter() {
   const hours = useSnap((s) => s.sim.postpone_hours);
   const [showPostponed, setShowPostponed] = useState(false);
   const pending = useMemo(() => recs.filter((r) => r.status === "PENDING"), [recs]);
-  const open = useMemo(() => pending.filter((r) => !r.snoozed).sort((a, b) => Number(b.overdue) - Number(a.overdue) || b.age_hours - a.age_hours), [pending]);
+  const open = useMemo(() => pending.filter((r) => !r.snoozed).sort((a, b) => Number(b.payload.funding === "NEEDS_EXTRA") - Number(a.payload.funding === "NEEDS_EXTRA") || Number(b.overdue) - Number(a.overdue) || b.age_hours - a.age_hours), [pending]);
   const postponed = useMemo(() => pending.filter((r) => r.snoozed), [pending]);
   const ignoreFor = (r: Rec) => alerts.find((a) => a.item_id && a.item_id === r.item_id && a.ignore_msg && ["STOCKOUT", "DELAYED_PO", "SAFETY_LOW"].includes(a.kind))?.ignore_msg ?? null;
   const oldest = open.reduce((m, r) => Math.max(m, r.age_hours), 0);
