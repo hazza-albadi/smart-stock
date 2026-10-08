@@ -1,6 +1,7 @@
 ﻿# First-time setup for Windows (PowerShell): check Node, install, seed, start. Stops with a clear message on any failure.
 # If scripts are blocked:  powershell -ExecutionPolicy Bypass -File .\setup.ps1
 $ErrorActionPreference = "Stop"
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 Set-Location -Path $PSScriptRoot
 
 function Stop-Setup([string]$msg) {

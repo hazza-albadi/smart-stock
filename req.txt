@@ -18,7 +18,7 @@ Check your computer at any time with:  npm run doctor   (messages in English and
                      Older Node (18, 20) does NOT work: install fails or the database module will not load.
 - npm              : 10 or newer (npm 11 verified). It comes with Node.
 - Git              : any recent version (only needed to clone the project and switch branch).
-- Free disk space  : about 1.5 GB for node_modules and the Next.js cache, plus a few MB for the database. (See "measured sizes" in section 9.)
+- Free disk space  : about 1 GB (node_modules 400 MB + Next.js cache ~100-300 MB + a few MB of data; measured, section 9).
 - Memory           : 2 GB free RAM is enough for the dev server.
 - Browser          : any current Chrome, Edge, Firefox or Safari.
 - Port             : 3000 by default (http://localhost:3000). If it is busy Next.js picks the next free one (3001 ...) and prints it.
@@ -142,7 +142,7 @@ on the first page load.
   npm run dev         development server (hot reload).     npm run build  then  npm start   = production build on the same port.
   npm run check [h]   prints the day-0 picture (or the picture after h simulated hours) in the terminal, English. Uses its own seed of smartstock.db.
   npm test            about 70 automated tests (formulas, texts, day-0 baseline, clock, decisions, space flow). Takes 3-6 minutes.
-  npm run audit 3 42  QUICK number audit: 3 simulated days, seed 42, on a throw-away database (about 1 minute). It never touches smartstock.db.
+  npm run audit 3 42  QUICK number audit: 3 simulated days, seed 42, on a throw-away database (about 20 seconds; ~1,250 checks). It never touches smartstock.db.
   npm run audit       FULL audit: 30 days x 3 seeds (about 15 minutes) - only before a release.
   npm run literals    scans the code for hard-coded ids, names and business numbers (must say "No hard-coded literals found").
   npx tsc --noEmit    type check.
@@ -175,7 +175,13 @@ on the first page load.
 
 9. VERIFIED ON
 --------------
-(filled in after the clean-install test; see the end of this file)
+Clean-install test: a fresh `git clone` into an empty temp folder (no node_modules, no smartstock.db), branch feature/space-flow, Windows 11.
+  - Node 22.23.3 : npm ci OK (no compiler), doctor OK, npm run seed OK, quick audit PASSED, 35 unit tests (calc, texts, UI rules) PASSED, production build OK.
+  - Node 24.15.0 : setup.ps1 (PowerShell) and setup.sh (Git Bash) both ran end to end; http://localhost:<port>/api/state showed day 0:
+                   2026-10-05 00:00, purchasing budget free 3,988.5 OMR, 7 decisions waiting, 1,400 m2 empty, 2 free-space windows, 0 offers.
+  - npm 11.12.1, Git 2.54. Not tested here: macOS and Linux machines themselves (the package contains their prebuilt SQLite binaries; setup.sh was run in Git Bash only).
+  - Measured sizes: node_modules 398 MB, .next after a build 95 MB, database about 1-2 MB.
+  - Finding fixed: without .npmrc, `npm ci` on a clean Windows machine tried to compile better-sqlite3 and failed ("find VS ... Desktop development with C++").
 
 
 10. NOTES FOR THE DEMO
