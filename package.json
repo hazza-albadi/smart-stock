@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/check-env.mjs --pre",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -12,7 +13,9 @@
     "check": "tsx scripts/check.ts",
     "literals": "tsx scripts/literals.ts",
     "baseline": "tsx scripts/baseline.ts",
-    "locales": "python scripts/locales_messages.py && python scripts/locales_ui.py && python scripts/locales_wording.py && python scripts/locales_space.py"
+    "locales": "python scripts/locales_messages.py && python scripts/locales_ui.py && python scripts/locales_wording.py && python scripts/locales_space.py",
+    "doctor": "node scripts/check-env.mjs",
+    "req:update": "node scripts/make-req.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
@@ -29,5 +32,9 @@
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
   }
 }

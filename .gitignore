@@ -1,5 +1,26 @@
+# dependencies and build output
 node_modules
 .next
-smartstock.db*
-next-env.d.ts
+out
 *.tsbuildinfo
+next-env.d.ts
+
+# local database (re-created from smartstock_data on first start or with `npm run seed`)
+smartstock.db*
+*.db
+*.db-shm
+*.db-wal
+
+# secrets and local settings: only the empty example is committed
+.env
+.env.*
+!.env.example
+
+# scratch, logs, OS and editor files
+scratch/
+tmp/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
