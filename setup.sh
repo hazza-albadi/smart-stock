@@ -12,7 +12,7 @@ command -v npm >/dev/null 2>&1 || fail "npm was not found. Reinstall Node.js. / 
 [ -d smartstock_data ] || fail "The smartstock_data folder is missing (git checkout -- smartstock_data). / مجلد smartstock_data مفقود."
 
 echo "== 1/4 Installing packages (npm ci) =="
-if [ -f package-lock.json ]; then npm ci || fail "npm ci failed. On Linux install build tools (sudo apt install build-essential python3), on macOS run xcode-select --install. / فشل التثبيت."; else npm install || fail "npm install failed."; fi
+if [ -f package-lock.json ]; then npm ci || fail "npm ci failed. Check `node -v` (22+); do not delete .npmrc; see req.txt section 2 for compiler tools. / فشل التثبيت."; else npm install || fail "npm install failed."; fi
 
 echo "== 2/4 Checking this computer (npm run doctor) =="
 npm run doctor || fail "The environment check found a problem (see above)."

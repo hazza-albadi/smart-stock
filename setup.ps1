@@ -21,7 +21,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { Stop-Setup "npm was 
 if (-not (Test-Path "smartstock_data")) { Stop-Setup "The smartstock_data folder is missing (git checkout -- smartstock_data). / مجلد smartstock_data مفقود." }
 
 Write-Host "== 1/4 Installing packages (npm ci) =="
-if (Test-Path "package-lock.json") { Run-Step "npm ci" "npm ci failed. If the message mentions better-sqlite3 or node-gyp install Visual Studio Build Tools (Desktop development with C++) and Python 3. / فشل التثبيت." }
+if (Test-Path "package-lock.json") { Run-Step "npm ci" "npm ci failed. Do not delete .npmrc (it makes npm use the prebuilt SQLite binary). If the message still mentions better-sqlite3 or node-gyp, check `node -v` (22+) and see req.txt section 2. / فشل التثبيت." }
 else { Run-Step "npm install" "npm install failed." }
 
 Write-Host "== 2/4 Checking this computer (npm run doctor) =="
