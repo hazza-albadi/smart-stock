@@ -173,7 +173,7 @@ export function alertAgent(group: string, trigger: string): AgentResult {
   // --- zone over capacity (safeguard: receiving never lets this happen) ---
   for (const z of computeZones().filter((x) => x.over_capacity > 1)) {
     alerts.push({ key: `SPACE_OVER:${z.zone_id}`, kind: "SPACE_OVER", item_id: null, severity: "High", title: M("alert.space_over.title", { zone: z.zone_id, over: z.over_capacity }),
-      detail: [M("alert.space_over.d1")], ignore: null });
+      detail: [M("alert.space_over.d1")], ignore: M("alert.space_over.ignore", { zone: z.zone_id }) });
   }
 
   // --- an order draft was cut because tenants hold the space (a signed lease beats a new purchase): shown in BOTH flows ---

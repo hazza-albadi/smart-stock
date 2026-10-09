@@ -9,6 +9,7 @@ import ar from "../locales/ar.json";
 import { useDatabase, db, closeDb } from "../lib/db";
 import { seedDatabase, defaultSettings } from "../lib/seed";
 import { runAll } from "../lib/agents/coordinator";
+import { alertAgent, alertsVerify } from "../lib/agents/alerts";
 import { tick } from "../lib/sim";
 import { UserError } from "../lib/core";
 import { loadSettings, setSetting, settingProblem } from "../lib/settings";
@@ -105,4 +106,14 @@ test("M3: postponing, editing a quantity and adding a company request re-run all
   let n = runs(); postpone(a.id); assert.equal(runs() - n, 5, "postpone");
   n = runs(); editQty(b.id, 10); assert.equal(runs() - n, 5, "edit quantity");
   n = runs(); createSpaceRequest({ company: "New Co", type: "general", area: 150, months: 2, from: "2026-11-01" }); assert.equal(runs() - n, 5, "company request");
+});
+
+test("m1: the zone-over-capacity alert has its if-ignored message, so the Alerts agent passes its own check", () => {
+  fresh();
+  const z = q(`SELECT zone_id, capacity_m2 c FROM warehouse_zones ORDER BY zone_id LIMIT 1`)[0];
+  const it = q(`SELECT item_id, space_m2_per_unit sp FROM items WHERE zone_id=? LIMIT 1`, z.zone_id)[0];
+  db().prepare(`INSERT INTO current_stock VALUES('LOT-OVER',?,?,?,'2026-10-05',NULL)`).run(it.item_id, z.zone_id, Math.ceil((z.c * 2) / it.sp)); // data that overfills the zone
+  alertAgent("t", "test");
+  assert.equal(q(`SELECT COUNT(*) n FROM alerts WHERE kind='SPACE_OVER' AND active=1`)[0].n, 1);
+  assert.deepEqual(alertsVerify().filter((c) => !c.ok), []);
 });
