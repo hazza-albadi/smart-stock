@@ -157,7 +157,15 @@ export default function Dashboard() {
         const res = await queued(() => http<{ snapshot: Snapshot; result: TickResult }>("/api/sim", { action: "tick", expected, auto: true }));
         if (off) return;
         apply(res);
-      } catch (e) { fail(e); return; }
+      } catch (e) {
+        // never leave the clock "running" with nothing moving: pause it on the server and say why
+        setError(e instanceof ApiError && e.msg && e.msg.k !== "err.server" && e.msg.k !== "err.network" ? e.msg : { k: "err.clock_stopped" });
+        await queued(() => http<{ snapshot: Snapshot }>("/api/sim", { action: "pause" })).then((r) => setSnapshot(r.snapshot)).catch(() => {
+          const s = getSnapshot(); // server unreachable: at least the screen stops saying "running"
+          if (s) setSnapshot({ ...s, sim: { ...s.sim, running: false } });
+        });
+        return;
+      }
       timer = setTimeout(loop, Math.max(100, intervalRef.current - (Date.now() - t0)));
     };
     loop();
