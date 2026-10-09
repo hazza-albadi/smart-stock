@@ -1195,5 +1195,10 @@
  "dur.month.two": "months",
  "dur.month.few": "months",
  "dur.month.many": "months",
- "dur.month.other": "months"
+ "dur.month.other": "months",
+ "top.next_event": "Next event",
+ "top.next_event_hint": "Run hour by hour until something needs a look: an alert, a delivery, an offer, a new decision",
+ "next.stop_event": "After {h:dur}: {ev:msg}",
+ "next.stop_decision": "After {h:dur}: a new decision is waiting for you ({n:n0} in total).",
+ "next.stop_none": "Nothing important happened in {h:dur}."
 }

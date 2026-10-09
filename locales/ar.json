@@ -1195,5 +1195,10 @@
  "dur.month.two": "شهرين",
  "dur.month.few": "أشهر",
  "dur.month.many": "شهراً",
- "dur.month.other": "شهر"
+ "dur.month.other": "شهر",
+ "top.next_event": "الحدث التالي",
+ "top.next_event_hint": "شغّل ساعة بساعة حتى يحدث ما يستحق النظر: تنبيه أو شحنة أو عرض أو قرار جديد",
+ "next.stop_event": "بعد {h:dur}: {ev:msg}",
+ "next.stop_decision": "بعد {h:dur}: قرار جديد بانتظارك (المجموع {n:n0}).",
+ "next.stop_none": "لم يحدث شيء مهم خلال {h:dur}."
 }

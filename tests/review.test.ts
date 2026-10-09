@@ -201,3 +201,21 @@ test("m6: a corrupt database file is moved aside and a fresh one is seeded, inst
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("X1: 'next important event' stops at the first hour that brings something to look at, says what it was, and is deterministic", () => {
+  const run = () => {
+    fresh();
+    const stops: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const r = advance({ untilEvent: true });
+      assert.ok(r.stop, "always says why it stopped");
+      assert.ok(r.ticks >= 1 && r.ticks <= loadSettings().n("sim.max_advance_hours"));
+      if (r.stop!.why === "event") assert.ok((r.stop!.event as { msg?: { k?: string } }).msg?.k, "the event carries a message to show");
+      stops.push(`${r.tick}:${r.stop!.why}:${(r.stop!.event as { type?: string } | undefined)?.type ?? r.stop!.waiting ?? ""}`);
+    }
+    return stops;
+  };
+  const a = run();
+  assert.ok(a.some((x) => !x.endsWith(":none")), JSON.stringify(a));
+  assert.deepEqual(run(), a, "same seed, same stops");
+});

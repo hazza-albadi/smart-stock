@@ -39,6 +39,13 @@ W = {
 "dur.month.one": ("month", "شهر"), "dur.month.two": ("months", "شهرين"), "dur.month.few": ("months", "أشهر"), "dur.month.many": ("months", "شهراً"), "dur.month.other": ("months", "شهر"),
 "sp.btn.list": ("List {area:m2} for {months:months} at {price:omr} per m²", "اعرض {area:m2} للإيجار لمدة {months:months} بسعر {price:omr} للمتر"),
 "sp.unmatched.line": ("for {months:months} from {from:date}", "لمدة {months:months} ابتداءً من {from:date}"),
+# ==== demo experience (Phase 3) ====
+# ---- time controls: jump to the next important event
+"top.next_event": ("Next event", "الحدث التالي"),
+"top.next_event_hint": ("Run hour by hour until something needs a look: an alert, a delivery, an offer, a new decision", "شغّل ساعة بساعة حتى يحدث ما يستحق النظر: تنبيه أو شحنة أو عرض أو قرار جديد"),
+"next.stop_event": ("After {h:dur}: {ev:msg}", "بعد {h:dur}: {ev:msg}"),
+"next.stop_decision": ("After {h:dur}: a new decision is waiting for you ({n:n0} in total).", "بعد {h:dur}: قرار جديد بانتظارك (المجموع {n:n0})."),
+"next.stop_none": ("Nothing important happened in {h:dur}.", "لم يحدث شيء مهم خلال {h:dur}."),
 }
 
 if __name__ == "__main__":

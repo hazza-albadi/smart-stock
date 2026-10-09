@@ -172,9 +172,17 @@ export default function Dashboard() {
     return () => { off = true; clearTimeout(timer); };
   }, [running, intervalMs, apply]);
 
-  const sim = async (body: Record<string, unknown>) => {
+  const sim = async (body: Record<string, unknown>): Promise<any> => {
     setBusy(true);
-    try { apply(await queued(() => http("/api/sim", body))); } catch (e) { fail(e); } finally { setBusy(false); }
+    try { const r = await queued(() => http<any>("/api/sim", body)); apply(r); return r; } catch (e) { fail(e); return null; } finally { setBusy(false); }
+  };
+  /** Runs hour by hour until something needs a look, then says what it was. */
+  const nextEvent = async () => {
+    setPauseEvents(null);
+    const r = await sim({ action: "advance", untilEvent: true });
+    const st = r?.result?.stop as { why: string; event?: { msg: Msg }; waiting?: number; hours: number } | undefined;
+    if (!st) return;
+    pushToast({ tone: st.why === "none" ? undefined : "ok", msg: st.why === "event" && st.event ? { k: "next.stop_event", v: { h: st.hours, ev: st.event.msg } } : st.why === "decision" ? { k: "next.stop_decision", v: { h: st.hours, n: st.waiting ?? 0 } } : { k: "next.stop_none", v: { h: st.hours } } });
   };
 
   const confirm: AppApi["confirm"] = (o) => new Promise((resolve) => setConfirmDlg({ ...o, resolve }));
@@ -301,7 +309,7 @@ export default function Dashboard() {
         <div className="min-h-screen">
           <TopBar theme={theme} pauseNote={!!pauseEvents}
             onPlay={() => { setPauseEvents(null); sim({ action: "play" }); }} onPause={() => sim({ action: "pause" })}
-            onStep={() => sim({ action: "tick", expected: getSnapshot()?.sim.tick })} onAdvance={(o) => sim({ action: "advance", ...o })}
+            onStep={() => sim({ action: "tick", expected: getSnapshot()?.sim.tick })} onNextEvent={nextEvent} onAdvance={(o) => sim({ action: "advance", ...o })}
             onReset={resetAll} onInterval={(ms) => sim({ action: "interval", ms })} onAutoPause={(v) => sim({ action: "auto_pause", value: v })}
             onLang={() => setLang((l) => (l === "ar" ? "en" : "ar"))} onTheme={toggleTheme} onHelp={() => setHelp(true)} />
 

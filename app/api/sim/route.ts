@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     let result: unknown = null;
     switch (b.action) {
       case "tick": result = tick({ expected: b.expected, auto: !!b.auto }); break;
-      case "advance": setRunning(false); result = advance({ hours: b.hours, untilDay: !!b.untilDay, untilCritical: !!b.untilCritical }); break;
+      case "advance": setRunning(false); result = advance({ hours: b.hours, untilDay: !!b.untilDay, untilCritical: !!b.untilCritical, untilEvent: !!b.untilEvent }); break;
       case "play": setRunning(true); break;
       case "pause": setRunning(false); break;
       case "interval": setIntervalMs(Number(b.ms)); break;

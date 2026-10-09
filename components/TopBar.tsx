@@ -2,11 +2,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useSnap } from "@/lib/store";
 import { useApp, useBusy } from "./ctx";
-import { Btn } from "./ui";
+import { Btn, Spinner } from "./ui";
 
 interface Props {
   theme: "light" | "dark"; pauseNote: boolean;
-  onPlay: () => void; onPause: () => void; onStep: () => void; onAdvance: (o: { hours?: number; untilDay?: boolean; untilCritical?: boolean }) => void;
+  onPlay: () => void; onPause: () => void; onStep: () => void; onNextEvent: () => void; onAdvance: (o: { hours?: number; untilDay?: boolean; untilCritical?: boolean }) => void;
   onReset: () => void; onInterval: (ms: number) => void; onAutoPause: (v: boolean) => void;
   onLang: () => void; onTheme: () => void; onHelp: () => void;
 }
@@ -96,6 +96,7 @@ export default function TopBar(p: Props) {
         <div className="flex items-center gap-2">
           {s.running ? <Btn size="lg" tone="ghost" onClick={p.onPause} className="min-w-[8.5rem]">⏸ {T("top.pause")}</Btn> : <Btn size="lg" tone="primary" onClick={p.onPlay} className="min-w-[8.5rem]">▶ {T("top.play")}</Btn>}
           <Btn size="lg" onClick={p.onStep} disabled={busy || s.running} title={why ?? T("top.step_hint")}>⏭ <span className="hidden sm:inline">{T("top.step")}</span><span className="sm:hidden">{T("top.step_short")}</span></Btn>
+          <Btn size="lg" onClick={p.onNextEvent} disabled={busy || s.running} title={why ?? T("top.next_event_hint")} ariaLabel={T("top.next_event")}>{busy && !s.running ? <Spinner /> : <span aria-hidden>⏩</span>} <span className="hidden sm:inline">{T("top.next_event")}</span></Btn>
         </div>
 
         <div className="ms-auto hidden items-center gap-2 md:flex">

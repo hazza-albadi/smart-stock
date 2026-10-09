@@ -132,23 +132,46 @@ export function tick(o: { expected?: number; auto?: boolean } = {}): TickResult 
   return { tick: n.tick, sim_date: n.sim_date, hour: n.hour, movements, events, critical, paused: paused || !n.running, ticks: 1 };
 }
 
-/** Server-side loop for "run N hours", "jump to next day" and "jump to next critical event". */
-export function advance(o: { hours?: number; untilDay?: boolean; untilCritical?: boolean }): TickResult {
+/** Events worth stopping for when the manager jumps to the next important event (besides critical ones and Critical/High alerts). */
+export const IMPORTANT_EVENTS = new Set(["PO_ARRIVED", "STOCKOUT", "OFFER_ARRIVED", "COUNTER_ACCEPTED", "COUNTER_DECLINED", "LEASE_START", "LEASE_END", "SPACE_CONFLICT", "OFFER_BLOCKED", "REC_REOPENED", "BUDGET_RENEWED", "RECEIVING_BLOCKED"]);
+type Ev = { type: string; severity: string; msg: unknown; meta: { pause?: boolean } | null; tick: number };
+const important = (e: Ev) => e.meta?.pause === true || IMPORTANT_EVENTS.has(e.type) || (e.type === "ALERT" && (e.severity === "critical" || e.severity === "high"));
+/** What waits for the manager: purchase suggestions (not postponed), new free-space windows, offers and conflicts. */
+export function decisionsWaiting(): number {
+  const d = db(), t = getSim().tick;
+  const recs = (d.prepare(`SELECT payload FROM recommendations WHERE status='PENDING'`).all() as { payload: string }[]).filter((r) => !((JSON.parse(r.payload).snooze_until ?? 0) > t)).length;
+  const space = (d.prepare(`SELECT (SELECT COUNT(*) FROM space_forecasts WHERE state IN ('NEW','CONFLICT')) + (SELECT COUNT(*) FROM space_offers WHERE status='PENDING') n`).get() as { n: number }).n;
+  return recs + space;
+}
+
+/** Server-side loop for "run N hours", "jump to next day", "jump to next critical event" and "jump to the next important event". */
+export function advance(o: { hours?: number; untilDay?: boolean; untilCritical?: boolean; untilEvent?: boolean }): TickResult & { stop?: { why: "event" | "decision" | "none"; event?: unknown; waiting?: number; hours: number } } {
   const cfg = loadSettings();
   const cap = cfg.n("sim.max_advance_hours");
   const s = getSim();
   let hours = o.untilDay ? 24 - s.hour : Math.max(1, Math.floor(o.hours ?? 1));
-  if (o.untilCritical) hours = cap;
+  if (o.untilCritical || o.untilEvent) hours = cap;
   hours = Math.min(hours, cap);
-  const acc: TickResult = { tick: s.tick, sim_date: s.sim_date, hour: s.hour, movements: [], events: [], critical: [], paused: !s.running, ticks: 0 };
+  const acc: ReturnType<typeof advance> = { tick: s.tick, sim_date: s.sim_date, hour: s.hour, movements: [], events: [], critical: [], paused: !s.running, ticks: 0 };
+  let waiting = o.untilEvent ? decisionsWaiting() : 0;
   for (let i = 0; i < hours; i++) {
     const r = tick();
     acc.movements.push(...r.movements); acc.events.push(...r.events); acc.critical.push(...r.critical);
     acc.tick = r.tick; acc.sim_date = r.sim_date; acc.hour = r.hour; acc.paused = r.paused; acc.ticks++;
     if (r.critical.length && (o.untilCritical || cfg.b("sim.auto_pause_critical"))) {
-      db().prepare(`UPDATE sim_state SET running=0 WHERE id=1`).run(); acc.paused = true; break;
+      db().prepare(`UPDATE sim_state SET running=0 WHERE id=1`).run(); acc.paused = true;
+      if (o.untilEvent) acc.stop = { why: "event", event: r.critical[0], hours: acc.ticks };
+      break;
+    }
+    if (o.untilEvent) {
+      const ev = (r.events as Ev[]).find(important);
+      if (ev) { acc.stop = { why: "event", event: ev, hours: acc.ticks }; break; }
+      const now = decisionsWaiting();
+      if (now > waiting) { acc.stop = { why: "decision", waiting: now, hours: acc.ticks }; break; }
+      waiting = now; // a decision that went away (e.g. an offer expired) lowers the bar
     }
   }
+  if (o.untilEvent && !acc.stop) acc.stop = { why: "none", hours: acc.ticks };
   if (acc.movements.length > 400) acc.movements = acc.movements.slice(-400);
   return acc;
 }
