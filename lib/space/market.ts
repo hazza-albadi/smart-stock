@@ -395,9 +395,11 @@ export function generateOffers(cfg: Settings, tick: number) {
       if (tick < due) continue;
       if (rand(`${seed}|prob|${l.id}|${r.request_id}`) >= arrivalProbability(l.price, mk)) continue;
       if (!willing(cfg, l, r)) continue;
-      const t = buildTerms(cfg, l, r, due);
+      // the offer arrives now when its planned hour has passed (a company added later, a listing back from a pause): never born expired
+      const at = Math.max(due, tick);
+      const t = buildTerms(cfg, l, r, at);
       d.prepare(`INSERT INTO space_offers(listing_id,request_id,company,area,start_date,end_date,price,status,arrived_tick,valid_until_tick) VALUES(?,?,?,?,?,?,?,'PENDING',?,?)`)
-        .run(l.id, r.request_id, r.company, t.area, t.start, t.end, t.price, due, due + cfg.n("space.offer_validity_h"));
+        .run(l.id, r.request_id, r.company, t.area, t.start, t.end, t.price, at, at + cfg.n("space.offer_validity_h"));
       logSpaceEvent("OFFER_ARRIVED", M("ev.sp.offer", { company: r.company, area: t.area, zone: l.zone_id, start: t.start, end: t.end, price: t.price }), "info", { ref: r.request_id });
     }
   }

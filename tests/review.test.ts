@@ -14,6 +14,11 @@ import { UserError } from "../lib/core";
 import { loadSettings, setSetting, settingProblem } from "../lib/settings";
 import { decide, postpone, editQty, manualMovement } from "../lib/decisions";
 import { handle } from "../lib/api";
+import { advance } from "../lib/sim";
+import { snapshot } from "../lib/snapshot";
+import { listWindow } from "../lib/space/actions";
+import { createSpaceRequest } from "../lib/decisions";
+import { getSim } from "../lib/core";
 
 const file = path.join(os.tmpdir(), `smartstock-review-${process.pid}.db`);
 const q = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).all(...a) as T[];
@@ -76,4 +81,19 @@ test("M2: refusals carry a message in the user's language; a real crash is a log
     assert.equal(refused.status, 400);
     assert.equal((await refused.json()).msg.k, "err.already_decided");
   } finally { console.error = quiet; }
+});
+
+test("M1: a company that turns up after a listing was published gets a visible offer, valid from now (never born expired)", () => {
+  fresh();
+  setSetting("space.offer_validity_h", 24); setSetting("space.offer_base_prob", 1); setSetting("space.min_bid_ratio", 0);
+  const w = snapshot().space.windows.filter((x) => x.state === "NEW").sort((a, b) => b.area - a.area)[0];
+  listWindow({ zone_id: w.zone_id, area: w.area, start_date: w.start, end_date: w.suggest.end, price: 4, publish: true });
+  advance({ hours: 130 }); // well past every planned arrival + validity
+  createSpaceRequest({ company: "Late Arrival Co", type: loadSettings().s("space.rentable_request_type"), area: 120, months: 2, from: w.start });
+  advance({ hours: 1 });
+  const now = getSim().tick;
+  const o = q(`SELECT status, arrived_tick, valid_until_tick FROM space_offers WHERE company='Late Arrival Co'`);
+  assert.equal(o.length, 1, "the late company sent an offer");
+  assert.equal(o[0].status, "PENDING", "the offer is waiting for the manager, not already expired");
+  assert.ok(o[0].arrived_tick >= now - 1 && o[0].valid_until_tick === o[0].arrived_tick + 24, JSON.stringify(o[0]));
 });
