@@ -24,7 +24,8 @@ function Menu({ label, icon, children, align = "start" }: { label: string; icon?
   return (
     <div ref={ref} className="relative">
       <button type="button" aria-haspopup="true" aria-expanded={open} onClick={() => setOpen(!open)} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-line bg-surface2 px-3 text-sm font-semibold hover:border-brand">{icon && <span aria-hidden>{icon}</span>}{label}<span aria-hidden className="text-xs">▾</span></button>
-      {open && <div className={`popover absolute top-12 z-50 w-72 max-w-[88vw] rounded-xl border border-line bg-surface p-3 shadow-xl ${align === "end" ? "end-0" : "start-0"}`}>{children}</div>}
+      {/* choosing an action closes the menu (typing in its number fields or ticking its checkbox does not) */}
+      {open && <div onClick={(e) => { if ((e.target as HTMLElement).closest("button:not(:disabled)")) setOpen(false); }} className={`popover absolute top-12 z-50 w-72 max-w-[88vw] rounded-xl border border-line bg-surface p-3 shadow-xl ${align === "end" ? "end-0" : "start-0"}`}>{children}</div>}
     </div>
   );
 }
