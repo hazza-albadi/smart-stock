@@ -272,7 +272,7 @@ test("every space decision (accept, reject, counter-offer, keep vacant) gets a b
 });
 
 // ------------------------------------------------------------------ the registry
-const read = (f: string) => fs.readFileSync(path.join(process.cwd(), f), "utf8");
+const read = (f: string) => fs.readFileSync(path.join(process.cwd(), f), "utf8").replace(/\r\n/g, "\n"); // checkouts on Windows may use CRLF
 
 test("every agent file starts with the same header and says what the registry says", () => {
   const fields = ["Name", "Stage", "Role", "Reads", "Writes", "VERIFY", "Runs when", "Hands over to"];
