@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import fs from "node:fs";
 import path from "node:path";
 
 let dbFile = process.env.SMARTSTOCK_DB || path.join(process.cwd(), "smartstock.db");
@@ -8,13 +9,31 @@ const g = globalThis as unknown as { __ssdb?: Database.Database; __ssfile?: stri
 export function db(): Database.Database {
   if (g.__ssdb && g.__ssfile !== dbFile) { g.__ssdb.close(); g.__ssdb = undefined; }
   if (!g.__ssdb) {
-    const d = new Database(dbFile);
-    d.pragma("journal_mode = WAL");
-    d.pragma("synchronous = NORMAL");
-    g.__ssdb = d;
+    g.__ssdb = open(dbFile);
     g.__ssfile = dbFile;
   }
   return g.__ssdb;
+}
+
+const BROKEN = new Set(["SQLITE_NOTADB", "SQLITE_CORRUPT"]);
+/**
+ * Opens the database. A file that is not a database (or is corrupt) is moved aside as `<file>.corrupt-<time>` and a fresh one is
+ * created, which the first request seeds from the CSV files (lib/ensure.ts). Without this every request failed and even `npm run seed` could not recover.
+ */
+function open(file: string): Database.Database {
+  const make = () => {
+    const d = new Database(file);
+    try { d.pragma("journal_mode = WAL"); d.pragma("synchronous = NORMAL"); d.prepare(`SELECT COUNT(*) FROM sqlite_master`).get(); return d; }
+    catch (e) { d.close(); throw e; } // release the file (Windows cannot move an open file)
+  };
+  try { return make(); }
+  catch (e) {
+    if (!BROKEN.has((e as { code?: string }).code ?? "")) throw e;
+    const aside = `${file}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    for (const ext of ["", "-wal", "-shm"]) if (fs.existsSync(file + ext)) fs.renameSync(file + ext, aside + ext);
+    console.warn(`[db] ${file} was not a valid database; moved to ${aside} and starting a fresh one`);
+    return make();
+  }
 }
 
 export function closeDb() { if (g.__ssdb) { g.__ssdb.close(); g.__ssdb = undefined; } }

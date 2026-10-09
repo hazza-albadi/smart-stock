@@ -15,6 +15,7 @@ import { UserError } from "../lib/core";
 import { loadSettings, setSetting, settingProblem } from "../lib/settings";
 import { decide, postpone, editQty, manualMovement } from "../lib/decisions";
 import { handle } from "../lib/api";
+import { ensureSeeded } from "../lib/ensure";
 import { advance } from "../lib/sim";
 import { snapshot } from "../lib/snapshot";
 import { listWindow, listingAction } from "../lib/space/actions";
@@ -182,5 +183,21 @@ test("m4: 'no room to order' is not critical while an order for the item is alre
   for (const a of q(`SELECT a.severity, a.item_id FROM alerts a WHERE a.kind='NO_ROOM' AND a.active=1`)) {
     const incoming = q(`SELECT 1 FROM purchase_orders_open WHERE item_id=? AND status IN ('OPEN','DELAYED_BY_SUPPLIER')`, a.item_id).length > 0;
     if (incoming) assert.notEqual(a.severity, "Critical", a.item_id);
+  }
+});
+
+test("m6: a corrupt database file is moved aside and a fresh one is seeded, instead of every request failing", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ss-corrupt-"));
+  const bad = path.join(dir, "smartstock.db");
+  fs.writeFileSync(bad, "this is not a database ".repeat(100));
+  const quiet = console.warn; console.warn = () => {};
+  try {
+    useDatabase(bad);
+    ensureSeeded();
+    assert.equal(snapshot().sim.tick, 0);
+    assert.ok(fs.readdirSync(dir).some((f) => f.startsWith("smartstock.db.corrupt-")), "the broken file is kept for inspection");
+  } finally {
+    console.warn = quiet; closeDb(); useDatabase(file);
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
