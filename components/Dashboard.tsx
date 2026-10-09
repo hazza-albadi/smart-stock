@@ -18,7 +18,8 @@ import ImpactPanel from "./ImpactPanel";
 import ManualPanel from "./ManualPanel";
 import SettingsPanel from "./SettingsPanel";
 import ItemDrawer from "./ItemDrawer";
-import { GuideTour, HelpModal } from "./Help";
+import { HelpModal } from "./Help";
+import DemoGuide from "./DemoGuide";
 import SectionNav from "./SectionNav";
 import SpaceView from "./space/SpaceView";
 import { Btn, Modal, Tabs } from "./ui";
@@ -383,7 +384,7 @@ export default function Dashboard() {
           </main>
 
           {selected && <ItemDrawer itemId={selected} onClose={() => setSelected(null)} />}
-          {tour && <GuideTour onDone={closeTour} />}
+          {tour && <DemoGuide onClose={closeTour} />}
           {help && <HelpModal onClose={() => setHelp(false)} onTour={() => { setHelp(false); setTour(true); }} />}
           {confirmDlg && (
             <Modal title={confirmDlg.title} onClose={() => { confirmDlg.resolve(false); setConfirmDlg(null); }}>

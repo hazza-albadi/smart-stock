@@ -106,7 +106,10 @@ html { scrollbar-gutter: stable; }
 [dir="ltr"] .drawer { animation: drawer-in-ltr 0.22s ease-out; }
 [dir="rtl"] .drawer { animation: drawer-in-rtl 0.22s ease-out; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* guided demo: "Show me" briefly rings the part of the screen the step talks about */
+.guide-flash { outline: 3px solid var(--brand); outline-offset: 4px; border-radius: 12px; animation: guide-ring 0.9s ease-in-out 3; }
+@keyframes guide-ring { 50% { outline-color: transparent; } }
 .spin { animation: spin 0.8s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .feed-row, .row-flash > td, .live-dot, .drawer, .skeleton { animation: none; transition: none; }
+  .feed-row, .row-flash > td, .live-dot, .drawer, .skeleton, .guide-flash { animation: none; transition: none; }
 }

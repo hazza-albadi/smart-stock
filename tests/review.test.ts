@@ -24,6 +24,7 @@ import { createSpaceRequest } from "../lib/decisions";
 import { getSim } from "../lib/core";
 import { render } from "../lib/render";
 import { diffSnapshots } from "../lib/changes";
+import { guideDone } from "../lib/guide";
 import { demandCurve, demandOver, type SeasonCfg } from "../lib/calc";
 import { settingsTableBlock, replaceSettingsTable } from "../lib/settings-table";
 
@@ -239,4 +240,23 @@ test("m7: every unit has its own word in each language (two units were both 'gal
     const words = Object.keys(L).filter((k) => k.startsWith("unit.")).map((k) => L[k].replace(/غ/g, "ج")); // غالون and جالون are the same word
     assert.equal(new Set(words).size, words.length, words.join(", "));
   }
+});
+
+test("X3: the guided demo ticks each step only when it really happened", () => {
+  fresh();
+  assert.deepEqual(guideDone(snapshot()), [false, false, false, false, false, false]);
+  tick();
+  assert.deepEqual(guideDone(snapshot()).slice(0, 3), [true, true, false], "clock ran, a risk is shown");
+  const r = q(`SELECT id FROM recommendations WHERE status='PENDING' AND kind='PO' ORDER BY id LIMIT 1`)[0];
+  decide(r.id, "APPROVED");
+  assert.equal(guideDone(snapshot())[2], true, "order approved");
+  const w = snapshot().space.windows.filter((x) => x.state === "NEW")[0];
+  const { listingId } = listWindow({ zone_id: w.zone_id, area: w.area, start_date: w.start, end_date: w.suggest.end, price: 4, publish: true });
+  assert.deepEqual(guideDone(snapshot()).slice(3), [true, false, false], "listed");
+  // a rental that starts today (what accepting an offer leads to): rent is counted at the next midnight
+  db().prepare(`INSERT INTO space_leases(offer_id,listing_id,request_id,company,zone_id,area,start_date,end_date,price,status,signed_tick,income,income_days) VALUES(0,?,'T','Test Co',?,100,?,?,4,'ACTIVE',0,0,0)`)
+    .run(listingId, w.zone_id, getSim().sim_date, w.suggest.end);
+  assert.deepEqual(guideDone(snapshot()).slice(4), [true, false]);
+  advance({ hours: 25 - getSim().hour }); // midnight itself is processed one tick later
+  assert.equal(guideDone(snapshot())[5], true, "rent earned");
 });

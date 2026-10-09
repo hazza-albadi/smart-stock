@@ -64,6 +64,23 @@ W = {
 "chg.new_alerts_more": ("and {n:n0} more new risk(s)", "و{n:n0} من المخاطر الجديدة الأخرى"),
 "chg.cleared": ("Risks cleared: {n:n0}", "مخاطر زالت: {n:n0}"),
 "chg.none": ("No number on the screen changed.", "لم يتغيّر أي رقم على الشاشة."),
+# ---- guided demo: six steps over the real screens, never blocking them
+"demo.guide.title": ("Guided demo", "عرض موجَّه"),
+"demo.guide.minimise": ("Make the guide small", "صغّر الدليل"),
+"demo.guide.show": ("Show me", "أرِني"),
+"demo.guide.done": ("done", "تم"),
+"demo.guide.run.t": ("A warehouse that runs by itself", "مستودع يعمل وحده"),
+"demo.guide.run.b": ("The clock at the top is the simulated date and hour. Press Start, or “Next event” to jump to the next moment that needs a look. Every hour items are used, deliveries arrive, and five agents check the stock, the money and the space.", "الساعة في الأعلى هي التاريخ والساعة في المحاكاة. اضغط «ابدأ»، أو «الحدث التالي» لتقفز إلى أول لحظة تستحق النظر. في كل ساعة تُستهلك الأصناف وتصل الشحنات، ويفحص خمسة وكلاء المخزون والمال والمساحة."),
+"demo.guide.risk.t": ("A stock risk", "خطر في المخزون"),
+"demo.guide.risk.b": ("“What is at risk” lists what will run out and when. Open a line: it says why (stock, usage, delivery time) and what happens if nobody acts.", "تعرض «ما المعرض للخطر» ما سينفد ومتى. افتح سطراً: يشرح السبب (المخزون والاستهلاك ومدة التوريد) وما يحدث إن لم يتصرف أحد."),
+"demo.guide.buy.t": ("The purchase decision is yours", "قرار الشراء لك"),
+"demo.guide.buy.b": ("The Replenishment agent proposes an order in “Needs your decision”, with why, what happens if you approve, and what happens if you do nothing. Approve it: the budget drops now, the goods arrive later, and a card shows what the agents changed.", "يقترح وكيل التزويد طلباً في «بانتظار قرارك»، مع السبب وما يحدث إن وافقت وما يحدث إن لم تفعل شيئاً. وافق عليه: تنقص الميزانية الآن وتصل البضاعة لاحقاً، وتُظهر بطاقة ما غيّره الوكلاء."),
+"demo.guide.list.t": ("Space we will not need", "مساحة لن نحتاجها"),
+"demo.guide.list.b": ("Open Space. The Space Forecast agent looked 90 days ahead and found area the company will not need. List it for rent (the price is an assumption of the demo).", "افتح «المساحات». نظر وكيل توقع المساحات ٩٠ يوماً إلى الأمام ووجد مساحة لن تحتاجها الشركة. اعرضها للإيجار (السعر افتراض للعرض)."),
+"demo.guide.offer.t": ("Offers arrive", "تصل العروض"),
+"demo.guide.offer.b": ("Press “Next event” until companies send offers. Each offer is checked six times in plain words. Accept one, or send a counter-offer.", "اضغط «الحدث التالي» حتى ترسل الشركات عروضها. يُفحص كل عرض ست مرات بكلمات واضحة. اقبل عرضاً أو أرسل عرضاً مضاداً."),
+"demo.guide.income.t": ("Rental income", "دخل الإيجار"),
+"demo.guide.income.b": ("When the rental starts, its area is held and rent is counted every day under “Rentals and income”, separate from the purchasing budget. A signed rental is never cancelled by a later purchase.", "عند بدء الإيجار تُحجز مساحته ويُحسب الإيجار كل يوم في «الإيجارات والدخل»، منفصلاً عن ميزانية المشتريات. ولا يُلغى إيجار موقّع بسبب شراء لاحق."),
 }
 
 if __name__ == "__main__":
