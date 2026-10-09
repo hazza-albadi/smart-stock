@@ -6,7 +6,9 @@ import en from "../locales/en.json";
 import ar from "../locales/ar.json";
 
 const E = en as Record<string, string>, A = ar as Record<string, string>;
-const files = fs.readdirSync("components").filter((f) => f.endsWith(".tsx")).map((f) => path.join("components", f));
+// every component, sub-folders included (components/space, components/site)
+const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((f) => (f.isDirectory() ? walk(path.join(d, f.name)) : f.name.endsWith(".tsx") ? [path.join(d, f.name)] : []));
+const files = walk("components");
 
 test("no user-facing text is typed in components (JSX text and text attributes go through translations)", () => {
   const bad: string[] = [];

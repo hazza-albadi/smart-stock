@@ -109,7 +109,7 @@ export function ComparePanel() {
                 <td className="tabular-nums px-3 py-2">{R({ k: "sp.cmp.m2", v: { n: o.area } })}</td>
                 <td className="tabular-nums px-3 py-2">{D(o.start_date)}</td>
                 <td className="tabular-nums px-3 py-2">{R({ k: "sp.cmp.months", v: { n: o.compare.months } })}</td>
-                <td className="tabular-nums px-3 py-2">{OMR(o.price)} <span className={`text-xs ${o.price >= o.listing_price ? "text-ok" : "text-high"}`}>{o.price > o.listing_price ? "▲" : o.price < o.listing_price ? "▼" : "="}</span></td>
+                <td className="tabular-nums px-3 py-2">{OMR(o.price)} <span className={`text-xs ${o.price >= o.listing_price ? "text-ok" : "text-high"}`}>{["▼", "=", "▲"][Math.sign(o.price - o.listing_price) + 1]}</span></td>
                 <td className="tabular-nums px-3 py-2 font-semibold">{OMR(o.compare.monthly)}</td>
                 <td className="tabular-nums px-3 py-2 font-semibold">{OMR(o.compare.total)}</td>
                 <td className="px-3 py-2 text-xs">{T(`sp.cmp.fit_${o.compare.fit_dates}`)} · {T(`sp.cmp.fit_${o.compare.fit_area}`)}</td>
