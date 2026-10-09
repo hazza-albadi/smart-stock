@@ -2,7 +2,7 @@
 import { memo, useMemo, useState } from "react";
 import { useSnap } from "@/lib/store";
 import { useApp, useBusy } from "../ctx";
-import { Btn, CardHead, Empty, ExplainBtn, Pill } from "../ui";
+import { Btn, CardHead, Empty, ExplainBtn, Pill, To } from "../ui";
 import { CounterDialog, RejectDialog } from "./SpaceDialogs";
 
 type Listing = ReturnType<typeof useListings>[number];
@@ -27,7 +27,7 @@ const ListingRow = memo(function ListingRow({ l }: { l: Listing }) {
         <Pill tone={LST_TONE[l.status]}>{T(`sp.lst.${l.status}`)}</Pill>
       </div>
       <div className="text-xs text-muted">
-        <span className="num">{D(l.start_date)}</span> → <span className="num">{D(l.end_date)}</span> · {R({ k: "sp.list.price", v: { price: l.price } })}
+        <span className="num">{D(l.start_date)}</span><To /><span className="num">{D(l.end_date)}</span> · {R({ k: "sp.list.price", v: { price: l.price } })}
         {l.leased > 0 && <> · {R({ k: "sp.list.leased", v: { leased: l.leased, rest: l.rest } })}</>}
         {l.offers_pending > 0 && <> · <strong className="text-info">{R({ k: "sp.list.offers", v: { n: l.offers_pending } })}</strong></>}
       </div>
@@ -51,7 +51,7 @@ const OfferHistoryRow = memo(function OfferHistoryRow({ o }: { o: Offer }) {
     <li className="rounded-lg bg-surface2 px-3 py-2 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">{o.company}</span><Pill tone={OFFER_TONE[o.status]}>{T(`sp.off.${o.status}`)}</Pill></div>
       <div className="text-xs text-muted">
-        <span className="num">{R({ k: "sp.off.line", v: { area: o.area, price: o.price } })}</span> · <span className="num">{D(o.start_date)}</span> → <span className="num">{D(o.end_date)}</span> · {T("sp.offer.arrived")} <span className="num">{DT(o.arrived_tick)}</span>
+        <span className="num">{R({ k: "sp.off.line", v: { area: o.area, price: o.price } })}</span> · <span className="num">{D(o.start_date)}</span><To /><span className="num">{D(o.end_date)}</span> · {T("sp.offer.arrived")} <span className="num">{DT(o.arrived_tick)}</span>
         {o.status === "REJECTED" && o.reason && <> · {T(`sp.reject.${o.reason}`)}</>}
         {o.status === "COUNTERED" && o.counter && <> · {R({ k: "sp.off.counter_line", v: { area: o.counter.area, price: o.counter.price } })} · {T("sp.off.answer_by")} <span className="num">{DT(o.counter_due_tick as number)}</span></>}
       </div>
@@ -144,7 +144,7 @@ export function LeasesPanel() {
         {leases.map((l) => (
           <li key={l.id} className="rounded-xl border border-line bg-surface p-3 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">{l.company}</span><Pill tone={l.status}>{T(`lease.${l.status}`)}</Pill></div>
-            <div className="text-xs text-muted">{R({ k: "sp.lease.line", v: { area: l.area, zone: l.zone_id, price: l.price } })} · <span className="num">{D(l.start_date)}</span> → <span className="num">{D(l.end_date)}</span></div>
+            <div className="text-xs text-muted">{R({ k: "sp.lease.line", v: { area: l.area, zone: l.zone_id, price: l.price } })} · <span className="num">{D(l.start_date)}</span><To /><span className="num">{D(l.end_date)}</span></div>
             <div className="mt-0.5 text-xs">{R({ k: "sp.lease.income", v: { day: l.per_day, income: l.income, days: l.income_days } })}</div>
           </li>
         ))}

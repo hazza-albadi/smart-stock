@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useSnap } from "@/lib/store";
 import { useApp, useBusy } from "./ctx";
-import { Btn, Empty, ExplainBtn, Pill } from "./ui";
+import { Btn, Empty, ExplainBtn, Pill, To } from "./ui";
 
 const TONE: Record<string, string> = { FUNDED: "FUNDED", PARTIAL: "PARTIALF", DEFERRED: "DEFERRED", REJECTED: "REJECTEDLINE", OVERSTOCK: "OVERSTOCK" };
 
@@ -19,7 +19,7 @@ export default function PlanPanel() {
     <div className="flex h-[560px] flex-col">
       <div className="p-4">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm text-muted">{T("plan.period")}: <span className="num">{D(b.start)}</span> → <span className="num">{D(b.end)}</span> · {T("plan.renews")} <span className="num font-semibold text-ink">{D(b.next_start)}</span> ({N(b.days_left)} {T("days")}, {OMR(b.next_amount)})</p>
+          <p className="text-sm text-muted">{T("plan.period")}: <span className="num">{D(b.start)}</span><To /><span className="num">{D(b.end)}</span> · {T("plan.renews")} <span className="num font-semibold text-ink">{D(b.next_start)}</span> ({N(b.days_left)} {T("days")}, {OMR(b.next_amount)})</p>
           {drafts.length > 1 && <Btn tone="ok" disabled={busy} onClick={async () => { if (await confirm({ title: T("plan.approve_all"), body: T("plan.approve_all_body"), action: T("plan.approve_all") })) for (const r of drafts) await decide(r.id, "APPROVED"); }}>{T("plan.approve_all")} ({N(drafts.length)})</Btn>}
         </div>
         <div className="flex h-5 w-full overflow-hidden rounded-full bg-surface2 ring-1 ring-line" role="img" aria-label={`${T("plan.committed")} ${OMR(b.committed)}, ${T("plan.drafts")} ${OMR(b.new_funded)}, ${T("plan.left")} ${OMR(remaining)}`}>

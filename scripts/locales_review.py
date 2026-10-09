@@ -64,6 +64,8 @@ W = {
 "chg.new_alerts_more": ("and {n:n0} more new risk(s)", "و{n:n0} من المخاطر الجديدة الأخرى"),
 "chg.cleared": ("Risks cleared: {n:n0}", "مخاطر زالت: {n:n0}"),
 "chg.none": ("No number on the screen changed.", "لم يتغيّر أي رقم على الشاشة."),
+# ---- "from A to B": the arrow points the reading way; screen readers say "to"
+"fmt.to": ("to", "إلى"),
 # ---- clarity: which agent proposed / found / checked each card (opens its stage log)
 "dc.by": ("proposed by the {agent:msg} agent", "اقترحه وكيل {agent:msg}"),
 "dc.found_by": ("found by the {agent:msg} agent", "وجده وكيل {agent:msg}"),

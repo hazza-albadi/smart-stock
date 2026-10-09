@@ -35,6 +35,8 @@ export function AgentBy({ agent, k = "dc.by" }: { agent: string; k?: "dc.by" | "
     </button>
   );
 }
+/** "from A to B" arrow that points the reading way (← in Arabic, → in English) and is read as "to" by screen readers. */
+export function To() { const { lang, T } = useApp(); return <span role="img" aria-label={T("fmt.to")}> {lang === "ar" ? "←" : "→"} </span>; }
 export function StatusPill({ status }: { status: string }) { const { T } = useApp(); return <Pill tone={status}>{T(`st.${status}`)}</Pill>; }
 export function SevPill({ sev }: { sev: string }) { const { T } = useApp(); return <Pill tone={sev}>{T(`sev.${sev}`)}</Pill>; }
 

@@ -1235,5 +1235,6 @@
  "dc.by": "proposed by the {agent:msg} agent",
  "dc.found_by": "found by the {agent:msg} agent",
  "dc.checked_by": "checked by the {agent:msg} agent",
- "dc.by_hint": "See what this agent read, decided and checked"
+ "dc.by_hint": "See what this agent read, decided and checked",
+ "fmt.to": "to"
 }

@@ -9,7 +9,7 @@ const Chip = ({ children }: { children: string }) => <code className="rounded bg
 
 /** Help tab: the flow, one card per registered agent (role, reads, writes, schedule, last run, self-check) and where the human approves. */
 export default function HowAgentsWork() {
-  const { T, N, R, CK, DT } = useApp();
+  const { T, N, R, CK, DT, lang } = useApp();
   const status = useSnap((s) => s.agents);
   const hoursText = (a: AgentDef, hours: number[]) => `${hours.length >= 24 ? T("agents.card.every_hour") : `${T("agents.card.at_hours")} ${hours.map((h) => CK(h)).join(", ")}`}${a.afterDecision ? ` ${T("agents.card.after_decision")}` : ""}`;
   return (
@@ -28,7 +28,7 @@ export default function HowAgentsWork() {
         </ol>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           <div className="rounded-lg border border-dashed border-line px-3 py-2 text-xs"><b>{T("agents.flow.coordinator")}</b> · <b>{T("agents.flow.db")}</b> (SQLite)</div>
-          <div className="rounded-lg border border-line px-3 py-2 text-xs font-semibold">{STAGES.map((s) => T(`stage.${s}`)).join(" → ")}</div>
+          <div className="rounded-lg border border-line px-3 py-2 text-xs font-semibold">{STAGES.map((s) => T(`stage.${s}`)).join(lang === "ar" ? " ← " : " → ")}</div>
         </div>
       </section>
       <ul className="grid gap-3 md:grid-cols-2">
