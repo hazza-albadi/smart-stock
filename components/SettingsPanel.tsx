@@ -8,19 +8,25 @@ interface Row { key: string; value: unknown; unit: string; description: string }
 
 /** Data check (are the numbers consistent?) and the settings of the simulation. */
 export default function SettingsPanel({ auditing, onAudit }: { auditing: boolean; onAudit: () => void }) {
-  const { T, N, post } = useApp();
+  const { T, N, R, post } = useApp();
   const busy = useBusy();
   const health = useSnap((s) => s.health);
   const [rows, setRows] = useState<Row[]>([]);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  useEffect(() => { if (open && !rows.length) fetch("/api/settings").then((r) => r.json()).then(setRows).catch(() => setErr(T("err.load"))); }, [open, rows.length, T]);
+  useEffect(() => {
+    if (!open || rows.length) return;
+    fetch("/api/settings").then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status))))).then((x) => (Array.isArray(x) ? setRows(x) : setErr(T("err.load")))).catch(() => setErr(T("err.load")));
+  }, [open, rows.length, T]);
   const save = async (r: Row) => {
     const txt = draft[r.key];
     if (txt === undefined || txt === JSON.stringify(r.value)) return;
-    try { setRows(await post("/api/settings", { key: r.key, value: JSON.parse(txt) })); setErr(null); setDraft((d) => { const n = { ...d }; delete n[r.key]; return n; }); }
-    catch (e) { setErr(`${r.key}: ${(e as Error).message}`); }
+    let value: unknown;
+    try { value = JSON.parse(txt); } catch { setErr(R({ k: "settings.err.json", v: { key: r.key } })); setSaved(null); return; }
+    try { setRows(await post("/api/settings", { key: r.key, value })); setErr(null); setSaved(r.key); setDraft((d) => { const n = { ...d }; delete n[r.key]; return n; }); }
+    catch (e) { const m = (e as { msg?: { k: string } }).msg; setErr(m ? R(m) : `${r.key}: ${(e as Error).message}`); setSaved(null); }
   };
   return (
     <div className="scroll-thin max-h-[560px] overflow-y-auto p-4">
@@ -42,6 +48,7 @@ export default function SettingsPanel({ auditing, onAudit }: { auditing: boolean
       {open && (
         <div className="mt-3 overflow-x-auto rounded-lg border border-line">
           {err && <p role="alert" className="m-3 rounded-md bg-crit-soft px-3 py-2 text-sm text-crit">{err}</p>}
+          {!err && saved && <p role="status" className="m-3 rounded-md bg-ok-soft px-3 py-2 text-sm text-ok">✓ {R({ k: "settings.saved", v: { key: saved } })}</p>}
           <table className="w-full min-w-[640px] border-collapse text-sm">
             <thead className="bg-surface2 text-xs text-muted"><tr><th className="px-3 py-2 text-start">{T("settings.key")}</th><th className="px-3 py-2 text-start">{T("settings.value")}</th><th className="px-3 py-2 text-start">{T("settings.desc")}</th></tr></thead>
             <tbody>
