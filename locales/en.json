@@ -1200,5 +1200,20 @@
  "top.next_event_hint": "Run hour by hour until something needs a look: an alert, a delivery, an offer, a new decision",
  "next.stop_event": "After {h:dur}: {ev:msg}",
  "next.stop_decision": "After {h:dur}: a new decision is waiting for you ({n:n0} in total).",
- "next.stop_none": "Nothing important happened in {h:dur}."
+ "next.stop_none": "Nothing important happened in {h:dur}.",
+ "chg.title": "What changed after your decision",
+ "chg.agents": "The agents ran again:",
+ "chg.more": "See what each agent did",
+ "chg.budget": "Free budget: from {from:omr} to {to:omr}",
+ "chg.waiting": "Purchasing decisions waiting: from {from:n0} to {to:n0}",
+ "chg.space_waiting": "Space decisions waiting: from {from:n0} to {to:n0}",
+ "chg.risk": "Items at risk: from {from:n0} to {to:n0}",
+ "chg.orders": "Orders on the way: from {from:n0} to {to:n0}",
+ "chg.listed": "Area on offer: from {from:m2} to {to:m2}",
+ "chg.leased": "Area rented out: from {from:m2} to {to:m2}",
+ "chg.income": "Rent per day: from {from:omr} to {to:omr}",
+ "chg.new_alert": "New risk: {title:msg}",
+ "chg.new_alerts_more": "and {n:n0} more new risk(s)",
+ "chg.cleared": "Risks cleared: {n:n0}",
+ "chg.none": "No number on the screen changed."
 }

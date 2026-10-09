@@ -22,8 +22,12 @@ import { GuideTour, HelpModal } from "./Help";
 import SectionNav from "./SectionNav";
 import SpaceView from "./space/SpaceView";
 import { Btn, Modal, Tabs } from "./ui";
+import ChangeSummary from "./ChangeSummary";
+import { diffSnapshots, type ChangeSummary as Change } from "@/lib/changes";
 
 const EMPTY_NAMES = {};
+/** Requests that are decisions of the manager (the coordinator re-runs the agents after each). */
+const DECISION_URL = /^\/api\/(recommendations|space|undo|manual)\b/;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** All requests go through one queue: a user action can never overlap a tick, and answers are applied in the order they were asked. */
@@ -67,6 +71,8 @@ export default function Dashboard() {
   const fail = (e: unknown) => setError(e instanceof ApiError && e.msg ? e.msg : String((e as Error).message ?? e));
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmDlg, setConfirmDlg] = useState<Confirm | null>(null);
+  const [change, setChange] = useState<Change | null>(null);
+  const changeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [help, setHelp] = useState(false);
   const [tour, setTour] = useState(false);
   const [tab, setTab] = useState("plan");
@@ -201,8 +207,17 @@ export default function Dashboard() {
   const post = useCallback(async (url: string, body: unknown, method = "POST") => {
     setBusy(true);
     try {
+      const before = getSnapshot();
       const res = await queued(() => http<any>(url, body, method));
-      if (res && res.snapshot) setSnapshot(res.snapshot);
+      if (res && res.snapshot) {
+        setSnapshot(res.snapshot);
+        // a decision of the manager re-runs the agents: show what they did and what moved on screen
+        if (before && DECISION_URL.test(url)) {
+          setChange(diffSnapshots(before, res.snapshot));
+          if (changeTimer.current) clearTimeout(changeTimer.current);
+          changeTimer.current = setTimeout(() => setChange(null), 20000);
+        }
+      }
       return res;
     } catch (e) {
       // a refused action usually means the screen was stale (decided in another tab, offer expired): show the current state
@@ -381,6 +396,7 @@ export default function Dashboard() {
           )}
 
           <div className="pointer-events-none fixed bottom-4 start-4 z-50 flex w-[min(420px,calc(100vw-2rem))] flex-col gap-2" aria-live="polite">
+            {change && <ChangeSummary change={change} onClose={() => setChange(null)} onAgents={() => { setChange(null); goTab("agents"); }} />}
             {toasts.map((t) => (
               <div key={t.id} className={`pointer-events-auto flex items-center justify-between gap-3 rounded-xl border border-s-4 bg-surface px-3 py-2 text-sm shadow-lg ${t.tone === "bad" ? "border-crit" : "border-ok"}`}>
                 <span>{R(t.msg)}</span>

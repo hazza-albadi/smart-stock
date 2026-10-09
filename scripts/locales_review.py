@@ -46,6 +46,22 @@ W = {
 "next.stop_event": ("After {h:dur}: {ev:msg}", "بعد {h:dur}: {ev:msg}"),
 "next.stop_decision": ("After {h:dur}: a new decision is waiting for you ({n:n0} in total).", "بعد {h:dur}: قرار جديد بانتظارك (المجموع {n:n0})."),
 "next.stop_none": ("Nothing important happened in {h:dur}.", "لم يحدث شيء مهم خلال {h:dur}."),
+# ---- cause and effect: what changed after a decision (from the snapshots before and after; words instead of arrows so RTL reads right)
+"chg.title": ("What changed after your decision", "ما الذي تغيّر بعد قرارك"),
+"chg.agents": ("The agents ran again:", "أعاد الوكلاء العمل:"),
+"chg.more": ("See what each agent did", "اعرض ما فعله كل وكيل"),
+"chg.budget": ("Free budget: from {from:omr} to {to:omr}", "الميزانية المتاحة: من {from:omr} إلى {to:omr}"),
+"chg.waiting": ("Purchasing decisions waiting: from {from:n0} to {to:n0}", "قرارات المشتريات المنتظرة: من {from:n0} إلى {to:n0}"),
+"chg.space_waiting": ("Space decisions waiting: from {from:n0} to {to:n0}", "قرارات المساحات المنتظرة: من {from:n0} إلى {to:n0}"),
+"chg.risk": ("Items at risk: from {from:n0} to {to:n0}", "الأصناف المعرضة للخطر: من {from:n0} إلى {to:n0}"),
+"chg.orders": ("Orders on the way: from {from:n0} to {to:n0}", "الطلبات في الطريق: من {from:n0} إلى {to:n0}"),
+"chg.listed": ("Area on offer: from {from:m2} to {to:m2}", "المساحة المعروضة: من {from:m2} إلى {to:m2}"),
+"chg.leased": ("Area rented out: from {from:m2} to {to:m2}", "المساحة المؤجّرة: من {from:m2} إلى {to:m2}"),
+"chg.income": ("Rent per day: from {from:omr} to {to:omr}", "الإيجار اليومي: من {from:omr} إلى {to:omr}"),
+"chg.new_alert": ("New risk: {title:msg}", "خطر جديد: {title:msg}"),
+"chg.new_alerts_more": ("and {n:n0} more new risk(s)", "و{n:n0} من المخاطر الجديدة الأخرى"),
+"chg.cleared": ("Risks cleared: {n:n0}", "مخاطر زالت: {n:n0}"),
+"chg.none": ("No number on the screen changed.", "لم يتغيّر أي رقم على الشاشة."),
 }
 
 if __name__ == "__main__":

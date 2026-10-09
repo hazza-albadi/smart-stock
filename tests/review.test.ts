@@ -23,6 +23,7 @@ import { addDays } from "../lib/time";
 import { createSpaceRequest } from "../lib/decisions";
 import { getSim } from "../lib/core";
 import { render } from "../lib/render";
+import { diffSnapshots } from "../lib/changes";
 import { demandCurve, demandOver, type SeasonCfg } from "../lib/calc";
 import { settingsTableBlock, replaceSettingsTable } from "../lib/settings-table";
 
@@ -218,4 +219,17 @@ test("X1: 'next important event' stops at the first hour that brings something t
   const a = run();
   assert.ok(a.some((x) => !x.endsWith(":none")), JSON.stringify(a));
   assert.deepEqual(run(), a, "same seed, same stops");
+});
+
+test("X2: after a decision the change summary names the five agents that ran again and the numbers that moved", () => {
+  fresh();
+  const before = snapshot();
+  const r = q(`SELECT id FROM recommendations WHERE status='PENDING' AND kind='PO' ORDER BY id LIMIT 1`)[0];
+  decide(r.id, "APPROVED");
+  const c = diffSnapshots(before, snapshot());
+  assert.deepEqual(c.agents, before.agent_order, "all five, in registry order");
+  const keys = c.lines.map((l) => l.k);
+  assert.ok(keys.includes("chg.budget") && keys.includes("chg.orders"), keys.join(","));
+  for (const l of c.lines) assert.notEqual(render("ar", l).includes("{"), true, l.k); // every line renders
+  assert.deepEqual(diffSnapshots(snapshot(), snapshot()).lines.map((l) => l.k), ["chg.none"]);
 });
