@@ -71,6 +71,13 @@ W = {
 "dc.found_by": ("found by the {agent:msg} agent", "وجده وكيل {agent:msg}"),
 "dc.checked_by": ("checked by the {agent:msg} agent", "فحصه وكيل {agent:msg}"),
 "dc.by_hint": ("See what this agent read, decided and checked", "اعرض ما قرأه هذا الوكيل وما قرره وما تحقق منه"),
+# ---- the in-app demo script follows the new controls (Next event, the change card, the guided demo)
+"demo.s4": ("In “Needs your decision”, open the order for that item and press the green button to approve it. A card “What changed after your decision” shows the five agents running again and what moved: budget, decisions waiting, risks.", "في «بانتظار قرارك» افتح طلب هذا الصنف واضغط الزر الأخضر للموافقة عليه. تُظهر بطاقة «ما الذي تغيّر بعد قرارك» الوكلاء الخمسة وهم يعملون من جديد وما الذي تغيّر: الميزانية والقرارات المنتظرة والمخاطر."),
+"demo.s6": ("Press “Next event”: the clock runs until something needs a look (here the approved delivery arriving at its hour) and says what it was.", "اضغط «الحدث التالي»: تجري الساعة حتى يحدث ما يستحق النظر (هنا وصول الشحنة المعتمدة في ساعتها) وتقول ما هو."),
+"demo.s10": ("Press “Next event” until a company sends an offer. Read the six checks, then accept it, send a counter-offer or reject it.", "اضغط «الحدث التالي» حتى ترسل شركة عرضاً. اقرأ الفحوص الستة ثم اقبله أو أرسل عرضاً مضاداً أو ارفضه."),
+"help.tour": ("Guided demo", "العرض الموجَّه"),
+"help.tour_text": ("A small panel with 6 steps over the real screens: stock risk, purchase decision, free space, offers, rental income. It never blocks the screen and ticks each step when it really happens.", "لوحة صغيرة من ٦ خطوات فوق الشاشات الحقيقية: خطر المخزون، قرار الشراء، المساحة الفارغة، العروض، دخل الإيجار. لا تحجب الشاشة أبداً وتؤشّر كل خطوة عندما تحدث فعلاً."),
+"help.tour_start": ("Start the guided demo", "ابدأ العرض الموجَّه"),
 # ---- guided demo: six steps over the real screens, never blocking them
 "demo.guide.title": ("Guided demo", "عرض موجَّه"),
 "demo.guide.minimise": ("Make the guide small", "صغّر الدليل"),
