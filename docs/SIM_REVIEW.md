@@ -16,7 +16,7 @@ Severity: **critical** = the simulation stops working or shows wrong business nu
 | id | severity | title | where | status |
 |---|---|---|---|---|
 | C1 | critical | a setting of the wrong type stops every tick | `lib/settings.ts` | fixed (`c17230e`) |
-| M1 | major | an offer can be created already expired | `lib/space/market.ts` (`generateOffers`) | fixed (`a162211`); changes the audit fingerprints, see below |
+| M1 | major | an offer can be created already expired | `lib/space/market.ts` (`generateOffers`) | fixed (`a162211`); audit fingerprints unchanged, see below |
 | M2 | major | refusals in raw English; server faults answered as 400 | `lib/api.ts`, `lib/decisions.ts`, `app/api/*` | fixed (`95b7f7e`) |
 | M3 | major | postpone / quantity edit / company request do not re-run the agents | `lib/decisions.ts` | fixed (`25ad73c`) |
 | M4 | major | English refusal of an offer shows "[object Object]" | `scripts/locales_space.py` (`sp.err.cannot_accept`) | fixed (`8df010f`) |
@@ -152,4 +152,12 @@ A probe run of 400 days (seed 42, auto-pause off, a manager who approves every p
 
 ## Audit fingerprints
 
-`npm run audit` (30 days × seeds 42, 7, 2026) fingerprints the simulated movements, leases and offers. Only **M1** can change them: the audit adds a company on day 4, after the first listing was published, and that company's offer is no longer born expired. Old values (main, `5e649ea`) and new values are listed below once the audit has run on this branch.
+`npm run audit` (30 days × seeds 42, 7, 2026, scripted decisions, every invariant every hour, then the same-seed re-run) on this branch: **AUDIT PASSED**, 16,703 checks per seed, 0 failures, same seed → same result, different seed → different result.
+
+| seed | main (`5e649ea`) | this branch |
+|---|---|---|
+| 42 | `b2113fda3617e6a410d57b33cf93e73e` | `b2113fda3617e6a410d57b33cf93e73e` |
+| 7 | `5e4dfe2415744812b15365d99cc1d276` | `5e4dfe2415744812b15365d99cc1d276` |
+| 2026 | `fd9cb1818b169b4eed5f4b7863c94d37` | `fd9cb1818b169b4eed5f4b7863c94d37` |
+
+**The fingerprints are identical**, so the baseline was not regenerated (the day-0 state the audit compares with `docs/reports/baseline.json` is unchanged too). The commit message of M1 (`a162211`) expected a change because the audit adds a company on day 4; in the audit's scenario that company's planned offer hour is still in the future when it is added, so its offer was never born expired and nothing differs. M1 matters when a company is added (or a listing resumed) after its planned hour, as the M1 test and the probe show. The performance fixes P1 and P2 return bit-identical numbers and the same rows. Audit wall-clock times (321 / 299 / 194 s on main, 242 / 278 / 385 s here) vary with the memory pressure on this machine and are not a measure of the fixes; the profile in P1 / P2 is.
