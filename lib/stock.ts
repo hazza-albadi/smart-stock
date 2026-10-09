@@ -9,7 +9,9 @@ export const totalOnHand = (itemId: string): number =>
 
 export function addMovement(date: string, itemId: string, type: "IN" | "OUT", qty: number, ref: string, lotId: string | null, actor = "system") {
   const d = db();
-  const n = (d.prepare(`SELECT COUNT(*) c FROM stock_movements WHERE sim=1`).get() as { c: number }).c + 1;
+  // next number of the simulated movements (never deleted, so = their count + 1); read from the last one instead of counting every row each time
+  const last = d.prepare(`SELECT movement_id m FROM stock_movements WHERE +sim=1 ORDER BY seq DESC LIMIT 1`).get() as { m: string } | undefined;
+  const n = (last ? Number(last.m.slice(4)) : 0) + 1;
   d.prepare(`INSERT INTO stock_movements(movement_id,date,item_id,movement_type,quantity,reference,balance_after,sim,tick,lot_id,actor) VALUES(?,?,?,?,?,?,?,1,?,?,?)`)
     .run(`SIM-${String(n).padStart(6, "0")}`, date, itemId, type, qty, ref, totalOnHand(itemId), getSim().tick, lotId, actor);
 }

@@ -35,9 +35,10 @@ export function snapshot() {
   const alerts: Record<string, any>[] = all(`SELECT * FROM alerts WHERE active=1 ORDER BY CASE severity WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Monitor' THEN 2 ELSE 3 END, first_tick DESC, id`)
     .map((a): Record<string, any> => ({ ...a, title: JSON.parse(a.title), detail: JSON.parse(a.detail), ignore_msg: a.ignore_msg ? JSON.parse(a.ignore_msg) : null, since_tick: a.first_tick }));
   const escalate = cfg.n("rec.escalate_hours");
-  const recs: Rec[] = all(`SELECT * FROM recommendations ORDER BY id`).map((r) => ({
-    ...r, payload: JSON.parse(r.payload), age_hours: sim.tick - r.created_tick, snoozed: (JSON.parse(r.payload).snooze_until ?? 0) > sim.tick, overdue: r.status === "PENDING" && sim.tick - r.created_tick >= escalate && !((JSON.parse(r.payload).snooze_until ?? 0) > sim.tick),
-  }) as Rec);
+  const recs: Rec[] = all(`SELECT * FROM recommendations ORDER BY id`).map((r) => {
+    const payload = JSON.parse(r.payload), snoozed = (payload.snooze_until ?? 0) > sim.tick;
+    return { ...r, payload, age_hours: sim.tick - r.created_tick, snoozed, overdue: r.status === "PENDING" && sim.tick - r.created_tick >= escalate && !snoozed } as Rec;
+  });
 
   const st = { criticalCover: cfg.n("status.critical_cover_weeks"), poSoonDays: cfg.n("status.po_soon_days"), lowCover: cfg.n("status.low_cover_weeks"), overstock: cfg.n("thresholds.overstock_weeks") };
   const expiryDays = cfg.n("thresholds.expiry_days"), lastUsable = cfg.n("expiry.last_usable_hour");
@@ -100,7 +101,7 @@ export function snapshot() {
   });
   const events = all(`SELECT * FROM events WHERE id IN (SELECT id FROM events WHERE flow IN ('purchasing','both') ORDER BY id DESC LIMIT ?) OR id IN (SELECT id FROM events WHERE flow IN ('space','both') ORDER BY id DESC LIMIT ?) ORDER BY id DESC`, cfg.n("ui.feed_page_size"), cfg.n("ui.feed_page_size")).map((e) => ({ ...e, msg: JSON.parse(e.msg), meta: e.meta ? JSON.parse(e.meta) : null }));
   const recent = all(`SELECT m.seq, m.date, m.tick, m.item_id, i.unit, m.movement_type, m.quantity, m.reference, m.balance_after, m.lot_id, m.actor
-    FROM stock_movements m JOIN items i ON i.item_id=m.item_id WHERE m.sim=1 ORDER BY m.seq DESC LIMIT ?`, cfg.n("ui.feed_page_size"));
+    FROM stock_movements m JOIN items i ON i.item_id=m.item_id WHERE +m.sim=1 ORDER BY m.seq DESC LIMIT ?`, cfg.n("ui.feed_page_size")); // +sim: walk the table backwards by seq and stop after the page (the sim index made SQLite sort every movement)
   const totals = all(`SELECT COUNT(*) n, COALESCE(SUM(CASE WHEN movement_type='IN' THEN quantity END),0) qin, COALESCE(SUM(CASE WHEN movement_type='OUT' THEN quantity END),0) qout
     FROM stock_movements WHERE sim=1`)[0];
   const healthRow = all(`SELECT * FROM audit_results ORDER BY id DESC LIMIT 1`)[0];

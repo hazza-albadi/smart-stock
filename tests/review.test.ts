@@ -21,6 +21,7 @@ import { listWindow, listingAction } from "../lib/space/actions";
 import { addDays } from "../lib/time";
 import { createSpaceRequest } from "../lib/decisions";
 import { getSim } from "../lib/core";
+import { demandCurve, demandOver, type SeasonCfg } from "../lib/calc";
 import { settingsTableBlock, replaceSettingsTable } from "../lib/settings-table";
 
 const file = path.join(os.tmpdir(), `smartstock-review-${process.pid}.db`);
@@ -147,5 +148,17 @@ test("M5: the conflict card of a partly leased listing offers a shrink that keep
   {
     listingAction(listingId, "shrink", c.shrink_to);
     assert.equal(q(`SELECT area FROM space_listings WHERE id=?`, listingId)[0].area, c.shrink_to);
+  }
+});
+
+test("P1: the shared demand curve gives exactly the numbers of demandOver (bit for bit), so results do not change", () => {
+  const season = defaultSettings().find((d) => d.key === "demand.season")!.value as SeasonCfg;
+  for (const itemId of [season.items[0], "NOT-SEASONAL"]) {
+    for (const now of [{ date: "2026-10-05", hour: 0 }, { date: "2026-12-30", hour: 17 }, { date: "2027-03-01", hour: 23 }]) {
+      const m = { itemId, baseWeekly: 123.456, season };
+      const curve = demandCurve(m, now);
+      for (const h of [0, 0.5, 1, 6, 7, 23.5, 24, 25, 47, 48, 100.25]) assert.equal(curve(h), demandOver(m, now, h), `${itemId} ${now.date} ${h}`);
+      for (let h = 0; h <= 400 * 24; h += 13) assert.equal(curve(h), demandOver(m, now, h), `${itemId} ${now.date} ${h}`);
+    }
   }
 });
