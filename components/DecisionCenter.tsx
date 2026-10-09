@@ -2,7 +2,7 @@
 import { memo, useMemo, useState } from "react";
 import { useSnap } from "@/lib/store";
 import { useApp, useBusy } from "./ctx";
-import { Btn, Empty, Pill, QtyEdit, Skeleton } from "./ui";
+import { AgentBy, Btn, Empty, Pill, QtyEdit, Skeleton } from "./ui";
 import SupplierMessage from "./SupplierMessage";
 
 type Rec = ReturnType<typeof useRecs>[number];
@@ -42,6 +42,7 @@ const DecisionCard = memo(function DecisionCard({ rec, ignoreMsg, postponeHours 
         {rec.source === "manual" && <Pill tone="user" icon={false}>{T("you")}</Pill>}
         {rec.reopen_count > 0 && <Pill tone="High">{T("dc.back")}</Pill>}
         {rec.overdue && <Pill tone="Critical">{T("dc.overdue")}</Pill>}
+        {rec.source !== "manual" && <AgentBy agent={rec.kind === "PO" ? "replenishment" : "alerts"} />}
         <span className="text-xs text-muted">{T("dc.waiting")} <span className="num font-semibold text-ink">{DUR(rec.age_hours)}</span> · {T("since")} <span className="num">{DT(rec.created_tick)}</span></span>
       </div>
       <h3 className="text-base font-bold leading-snug">{title}</h3>

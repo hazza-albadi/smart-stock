@@ -26,6 +26,15 @@ export function Pill({ tone, children, title, icon = true }: { tone: string; chi
     </span>
   );
 }
+/** Which agent proposed (found, checked) this; opens the agent log, where its READ / REASON / ACT / VERIFY stages are. */
+export function AgentBy({ agent, k = "dc.by" }: { agent: string; k?: "dc.by" | "dc.found_by" | "dc.checked_by" }) {
+  const { T, R, goTab } = useApp();
+  return (
+    <button type="button" onClick={() => goTab("agents")} title={T("dc.by_hint")} className="min-h-10 rounded-full px-1.5 text-xs font-semibold text-brand hover:underline">
+      <span aria-hidden>⚙ </span>{R({ k, v: { agent: { k: `agent.${agent}` } } })}
+    </button>
+  );
+}
 export function StatusPill({ status }: { status: string }) { const { T } = useApp(); return <Pill tone={status}>{T(`st.${status}`)}</Pill>; }
 export function SevPill({ sev }: { sev: string }) { const { T } = useApp(); return <Pill tone={sev}>{T(`sev.${sev}`)}</Pill>; }
 

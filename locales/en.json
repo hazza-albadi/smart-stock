@@ -1231,5 +1231,9 @@
  "demo.guide.offer.t": "Offers arrive",
  "demo.guide.offer.b": "Press “Next event” until companies send offers. Each offer is checked six times in plain words. Accept one, or send a counter-offer.",
  "demo.guide.income.t": "Rental income",
- "demo.guide.income.b": "When the rental starts, its area is held and rent is counted every day under “Rentals and income”, separate from the purchasing budget. A signed rental is never cancelled by a later purchase."
+ "demo.guide.income.b": "When the rental starts, its area is held and rent is counted every day under “Rentals and income”, separate from the purchasing budget. A signed rental is never cancelled by a later purchase.",
+ "dc.by": "proposed by the {agent:msg} agent",
+ "dc.found_by": "found by the {agent:msg} agent",
+ "dc.checked_by": "checked by the {agent:msg} agent",
+ "dc.by_hint": "See what this agent read, decided and checked"
 }

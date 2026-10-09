@@ -2,7 +2,7 @@
 import { memo, useMemo, useState } from "react";
 import { useSnap } from "@/lib/store";
 import { useApp, useBusy } from "../ctx";
-import { Btn, Empty, ExplainBtn, Pill } from "../ui";
+import { AgentBy, Btn, Empty, ExplainBtn, Pill } from "../ui";
 import { CounterDialog, ListDialog, RejectDialog, VacantDialog } from "./SpaceDialogs";
 
 type Win = ReturnType<typeof useWindows>[number];
@@ -33,6 +33,7 @@ const WindowCard = memo(function WindowCard({ w }: { w: Win }) {
     <li className="rounded-xl border border-line bg-surface p-3.5">
       <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
         <Pill tone="RESERVED" icon={false}>{T("sp.kind.window")}</Pill>
+        <AgentBy agent="space-forecast" k="dc.found_by" />
         <Pill tone={w.confidence === "high" ? "OK" : w.confidence === "medium" ? "Monitor" : "Low"}>{T(`sp.conf.${w.confidence}`)}</Pill>
         <span className="text-xs text-muted">{T("dc.waiting")} <span className="num font-semibold text-ink">{DUR(tick - w.since_tick)}</span> · {T("since")} <span className="num">{DT(w.since_tick)}</span></span>
         <ExplainBtn e={w.explain} />
@@ -66,6 +67,7 @@ const OfferCard = memo(function OfferCard({ o }: { o: Offer }) {
     <li className={`rounded-xl border bg-surface p-3.5 ${o.flag ? "border-high" : "border-line"}`}>
       <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
         <Pill tone="Info" icon={false}>{T("sp.kind.offer")}</Pill>
+        <AgentBy agent="space-forecast" k="dc.checked_by" />
         {o.flag && <Pill tone="High">{T("sp.offer.now_needed")}</Pill>}
         <span className="text-xs text-muted">{T("sp.offer.arrived")} <span className="num">{DT(o.arrived_tick)}</span> · {T("sp.offer.expires")} <span className="num font-semibold text-ink">{DUR(o.expires_in)}</span></span>
       </div>
@@ -107,6 +109,7 @@ const ConflictCard = memo(function ConflictCard({ c }: { c: Conflict }) {
     <li className="rounded-xl border-2 border-high bg-surface p-3.5">
       <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
         <Pill tone="High">{T("sp.kind.conflict")}</Pill>
+        <AgentBy agent="space-forecast" k="dc.found_by" />
         <span className="text-xs text-muted">{T("dc.waiting")} <span className="num font-semibold text-ink">{DUR(tick - c.since_tick)}</span> · {T("since")} <span className="num">{DT(c.since_tick)}</span></span>
       </div>
       <h3 className="text-base font-bold leading-snug">{R({ k: "sp.conflict.title", v: { zone: c.zone_id, short: c.short, listing: c.rest } })}</h3>
