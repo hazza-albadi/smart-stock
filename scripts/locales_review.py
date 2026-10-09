@@ -39,6 +39,8 @@ W = {
 "dur.month.one": ("month", "شهر"), "dur.month.two": ("months", "شهرين"), "dur.month.few": ("months", "أشهر"), "dur.month.many": ("months", "شهراً"), "dur.month.other": ("months", "شهر"),
 "sp.btn.list": ("List {area:m2} for {months:months} at {price:omr} per m²", "اعرض {area:m2} للإيجار لمدة {months:months} بسعر {price:omr} للمتر"),
 "sp.unmatched.line": ("for {months:months} from {from:date}", "لمدة {months:months} ابتداءً من {from:date}"),
+# ---- two different units were both "gallon" (جالون / غالون): a carboy is a large bottle, a jerrycan stays جالون (SIM_REVIEW m7)
+"unit.carboy": ("carboy", "قارورة"), "unit.jerrycan": ("jerrycan", "جالون"),
 # ==== demo experience (Phase 3) ====
 # ---- time controls: jump to the next important event
 "top.next_event": ("Next event", "الحدث التالي"),

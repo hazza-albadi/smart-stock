@@ -233,3 +233,10 @@ test("X2: after a decision the change summary names the five agents that ran aga
   for (const l of c.lines) assert.notEqual(render("ar", l).includes("{"), true, l.k); // every line renders
   assert.deepEqual(diffSnapshots(snapshot(), snapshot()).lines.map((l) => l.k), ["chg.none"]);
 });
+
+test("m7: every unit has its own word in each language (two units were both 'gallon' in Arabic)", () => {
+  for (const L of [en, ar] as Record<string, string>[]) {
+    const words = Object.keys(L).filter((k) => k.startsWith("unit.")).map((k) => L[k].replace(/غ/g, "ج")); // غالون and جالون are the same word
+    assert.equal(new Set(words).size, words.length, words.join(", "));
+  }
+});
