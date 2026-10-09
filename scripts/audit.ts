@@ -87,6 +87,7 @@ function runSeed(seed: number, label: string) {
     scriptedActions(r.tick);
     record(r.tick, hourlyInvariants());
     if (r.hour === 0) record(r.tick, dailyInvariants());
+    if (r.hour === 0 && (r.tick / 24) % 10 === 0) console.log(`  [seed ${seed}] day ${r.tick / 24}: ${checks} checks, ${failures.length} failure(s), ${Math.round((Date.now() - t0) / 1000)}s`);
   }
   const out = { seed, checks, failures: failures.length, fingerprint: fingerprint(), seconds: Math.round((Date.now() - t0) / 1000), db: file };
   return { out, failures };
