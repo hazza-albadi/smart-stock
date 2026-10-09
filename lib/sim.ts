@@ -135,8 +135,10 @@ export function tick(o: { expected?: number; auto?: boolean } = {}): TickResult 
 
 /** Events worth stopping for when the manager jumps to the next important event (besides critical ones and Critical/High alerts). */
 export const IMPORTANT_EVENTS = new Set(["PO_ARRIVED", "STOCKOUT", "OFFER_ARRIVED", "COUNTER_ACCEPTED", "COUNTER_DECLINED", "LEASE_START", "LEASE_END", "SPACE_CONFLICT", "OFFER_BLOCKED", "REC_REOPENED", "BUDGET_RENEWED", "RECEIVING_BLOCKED"]);
-type Ev = { type: string; severity: string; msg: unknown; meta: { pause?: boolean } | null; tick: number };
-const important = (e: Ev) => e.meta?.pause === true || IMPORTANT_EVENTS.has(e.type) || (e.type === "ALERT" && (e.severity === "critical" || e.severity === "high"));
+type Ev = { id: number; type: string; severity: string; msg: unknown; meta: { pause?: boolean } | null; tick: number; ref: string | null };
+/** An alert that flickers on and off near its threshold is news once a day, not every time it comes back (it stays in the risk list). */
+const repeatAlert = (e: Ev) => e.type === "ALERT" && !!db().prepare(`SELECT 1 FROM events WHERE type='ALERT' AND ref=? AND id<? AND tick>=?`).get(e.ref, e.id, e.tick - 24);
+const important = (e: Ev) => e.meta?.pause === true || IMPORTANT_EVENTS.has(e.type) || (e.type === "ALERT" && (e.severity === "critical" || e.severity === "high") && !repeatAlert(e));
 /** What waits for the manager: purchase suggestions (not postponed), new free-space windows, offers and conflicts. */
 export function decisionsWaiting(): number {
   const d = db(), t = getSim().tick;

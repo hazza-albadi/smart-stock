@@ -266,3 +266,17 @@ test("m8: no hard-coded '→' between values in components (it points backwards 
   const bad = walk("components").filter((f) => /<\/span>\s*→\s*<span|join\(" → "\)/.test(fs.readFileSync(f, "utf8")));
   assert.deepEqual(bad, []);
 });
+
+test("X1b: 'next event' does not stop again for the same alert within a day (an alert that flickers near its threshold)", () => {
+  fresh();
+  const seen = new Map<string, number>();
+  for (let i = 0; i < 12; i++) {
+    const r = advance({ untilEvent: true });
+    const ev = r.stop?.event as { type?: string; ref?: string; meta?: { pause?: boolean } } | undefined;
+    if (ev?.type === "ALERT" && !ev.meta?.pause && ev.ref) {
+      const last = seen.get(ev.ref);
+      assert.ok(last === undefined || r.tick - last > 24, `stopped twice within a day for ${ev.ref}`);
+      seen.set(ev.ref, r.tick);
+    }
+  }
+});
