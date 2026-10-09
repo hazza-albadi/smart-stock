@@ -120,7 +120,9 @@ Every decision carries its simulated time and shows in **After your decisions** 
 ## 7. Where to find what
 
 ```
-app/                  Next.js pages and API routes (app/api/{sim,agents,drafts,recommendations,space/*})
+app/(site)/            the public website: /, /spaces, /login (Arabic, own font);  app/simulation = the workspace
+app/                  Next.js pages and API routes (app/api/{sim,agents,drafts,recommendations,space/*,public-spaces,trial,signin,signout})
+middleware.ts         the demo gate (lib/gate.ts holds the rules)
 components/           React UI: Dashboard, AgentPanel, HowAgentsWork, SummaryCard, DraftsPanel, space/*
 lib/agents/           THE AGENTS: forecast, replenishment, space-optimization, alerts, space-forecast
 lib/agents/registry.ts   the single list of agents; coordinator.ts runs it; steps.ts = stage log + VERIFY helpers
@@ -141,7 +143,11 @@ tests/                the test suite (agents, space, budget, offers, calc, sim, 
 docs/                 this file, reports/ (audit, baseline), notes/, screenshots by topic (index: docs/README.md)
 ```
 
-## 8. How to check it
+## 8. The public website and the demo gate
+
+The app has a public Arabic website in front of the workspace. `/` (home), `/spaces` (spaces on offer: read-only from `space_listings` through `GET /api/public-spaces`, `lib/publicSpaces.ts`) and `/login` are public. The workspace moved from `/` to **`/simulation`**; `middleware.ts` (rules in `lib/gate.ts`) redirects it to `/login` unless the cookie `ss_session=trial` is present, and answers `401` for every other `/api/*` route without it. **Trial sign-in** (`POST /api/trial`) sets the cookie; the sign-in form has no accounts behind it and always shows an error; sign-out (`POST /api/signout`) clears the cookie. **This is a demo gate, not security.** The website pages live in the route group `app/(site)` (own layout with the Thmanyah font, RTL, Arabic only) and components in `components/site/`; their texts are the `site.*` locale keys. The website never touches the simulation, the agents or the schema.
+
+## 9. How to check it
 
 ```bash
 npm test            # unit + integration tests, including the agent stage log, forced-failure re-run, summary, drafts and registry tests

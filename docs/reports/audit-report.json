@@ -11,24 +11,24 @@
       "checks": 16703,
       "failures": 0,
       "fingerprint": "b2113fda3617e6a410d57b33cf93e73e",
-      "seconds": 115,
-      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-29060-42.db"
+      "seconds": 321,
+      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-27748-42.db"
     },
     {
       "seed": 7,
       "checks": 16703,
       "failures": 0,
       "fingerprint": "5e4dfe2415744812b15365d99cc1d276",
-      "seconds": 132,
-      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-29060-7.db"
+      "seconds": 299,
+      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-27748-7.db"
     },
     {
       "seed": 2026,
       "checks": 16703,
       "failures": 0,
       "fingerprint": "fd9cb1818b169b4eed5f4b7863c94d37",
-      "seconds": 167,
-      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-29060-2026.db"
+      "seconds": 194,
+      "db": "C:\\Users\\hazza\\AppData\\Local\\Temp\\smartstock-audit-27748-2026.db"
     }
   ],
   "determinism": {

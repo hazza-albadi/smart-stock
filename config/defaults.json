@@ -635,6 +635,22 @@
     "description": "Chance that a company accepts a fair counter-offer."
   },
   {
+    "key": "space.public_demo_samples",
+    "value": true,
+    "unit": "bool",
+    "description": "When no space is listed, the public website shows three sample listings, clearly labelled as samples."
+  },
+  {
+    "key": "space.public_demo_sample_areas",
+    "value": [
+      200,
+      400,
+      800
+    ],
+    "unit": "json",
+    "description": "Areas (m2) of the sample listings on the public website."
+  },
+  {
     "key": "space.days_per_month",
     "value": 30,
     "unit": "days",
