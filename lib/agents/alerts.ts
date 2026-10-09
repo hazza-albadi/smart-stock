@@ -234,7 +234,7 @@ export function alertAgent(group: string, trigger: string): AgentResult {
     const l = live.get(r.item_id);
     if (!l || l.item.lead_time_days * 24 <= (coverHours(l.onHand, l.weeklyUsage) ?? Infinity)) continue; // only when the stock really lasts less than the delivery time
     alerts.push({
-      key: `NO_ROOM:${r.item_id}`, kind: "NO_ROOM", item_id: r.item_id, severity: l.onHand <= 0 ? "Critical" : "High",
+      key: `NO_ROOM:${r.item_id}`, kind: "NO_ROOM", item_id: r.item_id, severity: l.onHand <= 0 && !l.pos.length ? "Critical" : "High", // an order already on its way is not a critical "cannot order"
       title: M("alert.no_room.title", { item: r.item_id, zone: l.item.zone_id }),
       detail: [M("alert.no_room.d1", { qty: r.qty, unit: l.item.unit, item: r.item_id, zone: l.item.zone_id, overflow: cfg.s("space.overflow_zone") })],
       ignore: M("alert.no_room.ignore", { item: r.item_id }),

@@ -170,3 +170,17 @@ test("m5: months are written with the right Arabic agreement", () => {
   assert.doesNotMatch(ar(6), /٦ شهر /);
   assert.match(render("en", { k: "sp.btn.list", v: { area: 100, months: 1, price: 4 } }), /for 1 month /);
 });
+
+test("m4: 'no room to order' is not critical while an order for the item is already on its way", () => {
+  fresh();
+  // the demo case: approve the frozen-shrimp order when it has run out; the rest cannot be ordered for lack of room
+  for (let i = 0; i < 60 && !q(`SELECT 1 FROM events WHERE type='STOCKOUT'`).length; i++) tick();
+  const out = q(`SELECT item_id FROM events WHERE type='STOCKOUT' ORDER BY id LIMIT 1`)[0]?.item_id;
+  assert.ok(out, "an item ran out");
+  const r = q(`SELECT id FROM recommendations WHERE kind='PO' AND status='PENDING' AND item_id=?`, out)[0];
+  if (r) decide(r.id, "APPROVED");
+  for (const a of q(`SELECT a.severity, a.item_id FROM alerts a WHERE a.kind='NO_ROOM' AND a.active=1`)) {
+    const incoming = q(`SELECT 1 FROM purchase_orders_open WHERE item_id=? AND status IN ('OPEN','DELAYED_BY_SUPPLIER')`, a.item_id).length > 0;
+    if (incoming) assert.notEqual(a.severity, "Critical", a.item_id);
+  }
+});
