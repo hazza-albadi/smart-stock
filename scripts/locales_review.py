@@ -35,6 +35,10 @@ W = {
 "err.clock_stopped": ("The clock stopped because the last hour could not be run. It is paused now; press Start to try again.", "توقفت الساعة لأن الساعة الأخيرة تعذر تشغيلها. هي متوقفة الآن؛ اضغط «ابدأ» للمحاولة مرة أخرى."),
 # ---- the "zone over capacity" alert gets its if-ignored message (SIM_REVIEW m1)
 "alert.space_over.ignore": ("Goods may be stored in aisles or outside the zone, which is unsafe, and new deliveries for {zone} cannot be received.", "قد تُخزَّن البضائع في الممرات أو خارج المنطقة، وهذا غير آمن، ولا يمكن استلام شحنات جديدة لـ {zone}."),
+# ---- months with the right Arabic agreement (SIM_REVIEW m5): "٦ شهر" -> "٦ أشهر", "١٢ شهراً", "شهرين"
+"dur.month.one": ("month", "شهر"), "dur.month.two": ("months", "شهرين"), "dur.month.few": ("months", "أشهر"), "dur.month.many": ("months", "شهراً"), "dur.month.other": ("months", "شهر"),
+"sp.btn.list": ("List {area:m2} for {months:months} at {price:omr} per m²", "اعرض {area:m2} للإيجار لمدة {months:months} بسعر {price:omr} للمتر"),
+"sp.unmatched.line": ("for {months:months} from {from:date}", "لمدة {months:months} ابتداءً من {from:date}"),
 }
 
 if __name__ == "__main__":

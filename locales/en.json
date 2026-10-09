@@ -646,7 +646,7 @@
  "sp.win.held": "Kept empty until {until:date}",
  "sp.win.open": "Waiting for your decision",
  "sp.pending_warn": "An order suggestion for {item:item} ({qty:n0}) is not approved yet; if you approve it, it needs up to {area:m2} from {date:date}. You can still list.",
- "sp.btn.list": "List {area:m2} for {months:n0} months at {price:omr} per m²",
+ "sp.btn.list": "List {area:m2} for {months:months} at {price:omr} per m²",
  "sp.btn.keep": "Keep empty until {until:date}",
  "sp.btn.vacant": "Keep empty until {until:date}",
  "sp.btn.accept": "Accept offer",
@@ -810,7 +810,7 @@
  "sp.unmatched.sub": "Companies that asked for space but cannot become offers. For information only.",
  "sp.unmatched.empty": "Nothing here",
  "sp.unmatched.want": "wants {area:m2} ({type:stype})",
- "sp.unmatched.line": "for {months:n0} months from {from:date}",
+ "sp.unmatched.line": "for {months:months} from {from:date}",
  "sp.unmatched.never": "{zone:zname} is never rented out.",
  "sp.unmatched.dates": "It needs space after your listing ends on {to:date}.",
  "sp.unmatched.price": "Not interested at {price:omr} per m² (the market is about {market:omr}).",
@@ -1190,5 +1190,10 @@
  "err.po_moved": "This can no longer be undone: the order has already arrived or changed.",
  "err.bad_action": "This action is not known.",
  "err.clock_stopped": "The clock stopped because the last hour could not be run. It is paused now; press Start to try again.",
- "alert.space_over.ignore": "Goods may be stored in aisles or outside the zone, which is unsafe, and new deliveries for {zone} cannot be received."
+ "alert.space_over.ignore": "Goods may be stored in aisles or outside the zone, which is unsafe, and new deliveries for {zone} cannot be received.",
+ "dur.month.one": "month",
+ "dur.month.two": "months",
+ "dur.month.few": "months",
+ "dur.month.many": "months",
+ "dur.month.other": "months"
 }

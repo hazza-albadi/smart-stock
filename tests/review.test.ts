@@ -21,6 +21,7 @@ import { listWindow, listingAction } from "../lib/space/actions";
 import { addDays } from "../lib/time";
 import { createSpaceRequest } from "../lib/decisions";
 import { getSim } from "../lib/core";
+import { render } from "../lib/render";
 import { demandCurve, demandOver, type SeasonCfg } from "../lib/calc";
 import { settingsTableBlock, replaceSettingsTable } from "../lib/settings-table";
 
@@ -161,4 +162,11 @@ test("P1: the shared demand curve gives exactly the numbers of demandOver (bit f
       for (let h = 0; h <= 400 * 24; h += 13) assert.equal(curve(h), demandOver(m, now, h), `${itemId} ${now.date} ${h}`);
     }
   }
+});
+
+test("m5: months are written with the right Arabic agreement", () => {
+  const ar = (n: number) => render("ar", { k: "sp.btn.list", v: { area: 100, months: n, price: 4 } });
+  assert.match(ar(6), /٦ أشهر/); assert.match(ar(12), /١٢ شهراً/); assert.match(ar(2), /شهرين/);
+  assert.doesNotMatch(ar(6), /٦ شهر /);
+  assert.match(render("en", { k: "sp.btn.list", v: { area: 100, months: 1, price: 4 } }), /for 1 month /);
 });

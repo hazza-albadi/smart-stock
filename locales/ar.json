@@ -646,7 +646,7 @@
  "sp.win.held": "فارغة حتى {until:date}",
  "sp.win.open": "بانتظار قرارك",
  "sp.pending_warn": "اقتراح طلب لـ {item:item} ({qty:n0}) لم يُعتمد بعد؛ وإن اعتمدته فسيحتاج حتى {area:m2} ابتداءً من {date:date}. لا يزال بإمكانك الإعلان.",
- "sp.btn.list": "اعرض {area:m2} للإيجار لمدة {months:n0} شهر بسعر {price:omr} للمتر",
+ "sp.btn.list": "اعرض {area:m2} للإيجار لمدة {months:months} بسعر {price:omr} للمتر",
  "sp.btn.keep": "أبقها فارغة حتى {until:date}",
  "sp.btn.vacant": "أبقها فارغة حتى {until:date}",
  "sp.btn.accept": "اقبل العرض",
@@ -810,7 +810,7 @@
  "sp.unmatched.sub": "شركات طلبت مساحة ولا يمكن أن تتحول إلى عروض. للاطلاع فقط.",
  "sp.unmatched.empty": "لا شيء هنا",
  "sp.unmatched.want": "تريد {area:m2} ({type:stype})",
- "sp.unmatched.line": "لمدة {months:n0} شهر ابتداءً من {from:date}",
+ "sp.unmatched.line": "لمدة {months:months} ابتداءً من {from:date}",
  "sp.unmatched.never": "{zone:zname} لا تُؤجَّر أبداً.",
  "sp.unmatched.dates": "تحتاج مساحة بعد انتهاء إعلانك في {to:date}.",
  "sp.unmatched.price": "غير مهتمة بسعر {price:omr} للمتر (والسوق حوالي {market:omr}).",
@@ -1190,5 +1190,10 @@
  "err.po_moved": "لم يعد بالإمكان التراجع: الطلب وصل أو تغيّر.",
  "err.bad_action": "هذا الإجراء غير معروف.",
  "err.clock_stopped": "توقفت الساعة لأن الساعة الأخيرة تعذر تشغيلها. هي متوقفة الآن؛ اضغط «ابدأ» للمحاولة مرة أخرى.",
- "alert.space_over.ignore": "قد تُخزَّن البضائع في الممرات أو خارج المنطقة، وهذا غير آمن، ولا يمكن استلام شحنات جديدة لـ {zone}."
+ "alert.space_over.ignore": "قد تُخزَّن البضائع في الممرات أو خارج المنطقة، وهذا غير آمن، ولا يمكن استلام شحنات جديدة لـ {zone}.",
+ "dur.month.one": "شهر",
+ "dur.month.two": "شهرين",
+ "dur.month.few": "أشهر",
+ "dur.month.many": "شهراً",
+ "dur.month.other": "شهر"
 }

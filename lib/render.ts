@@ -17,6 +17,7 @@ function fmtValue(lang: Lang, fmt: string, v: unknown, ctx: RenderCtx): string {
     case "date": return typeof v === "string" && v ? dateMed(lang, v) : "—";
     case "clock": return clock(lang, n);
     case "dur": return duration(lang, n);
+    case "months": return countWord(lang, Math.round(n), "dur.month"); // number + noun with the right Arabic agreement (شهرين، ٣ أشهر، ١٢ شهراً)
     case "dt": { const [d, h] = String(v).split("|"); return d ? `${dateShort(lang, d)} ${clock(lang, Number(h))}` : "—"; }
     case "ongoing": return n ? t(lang, "fmt.ongoing") : "";
     case "item": { const i = ctx.items?.[String(v)]; return i ? (lang === "ar" ? i.name_ar : i.name_en) : String(v); }
@@ -46,15 +47,18 @@ export function render(lang: Lang, m: Msg | Msg[] | null | undefined, ctx: Rende
   return tpl.replace(/\{(\w+)(?::(\w+))?\}/g, (_, name: string, fmt?: string) => fmtValue(lang, fmt ?? "txt", ((m as Msg).v ?? {})[name], ctx));
 }
 
+/** A count with its noun in the right plural form (Arabic: one / two / few / many / other). */
+export function countWord(lang: Lang, n: number, base: string): string {
+  const cat = pluralCat(lang, n);
+  const k = `${base}.${cat}`;
+  if (cat === "two" && lang === "ar") return t(lang, k); // the Arabic dual already says "two"
+  return `${num(lang, n)} ${t(lang, t(lang, k) === k ? `${base}.other` : k)}`;
+}
+
 /** "about 7 hours" / "about 3 days" / "about 2 weeks": a duration in plain words (formatting only; the hours come from the server). */
 export function duration(lang: Lang, hours: number | null | undefined): string {
   if (hours === null || hours === undefined || !Number.isFinite(hours)) return t(lang, "dur.unknown");
-  const word = (n: number, base: string) => {
-    const cat = pluralCat(lang, n);
-    const k = `${base}.${cat}`;
-    if (cat === "two" && lang === "ar") return t(lang, k); // Arabic dual form already says "two"
-    return `${num(lang, n)} ${t(lang, t(lang, k) === k ? `${base}.other` : k)}`;
-  };
+  const word = (n: number, base: string) => countWord(lang, n, base);
   if (hours < 1) return t(lang, "dur.lt1h");
   if (hours < 48) return word(Math.round(hours), "dur.hour");
   if (hours < 24 * 14) return word(Math.round(hours / 24), "dur.day");
