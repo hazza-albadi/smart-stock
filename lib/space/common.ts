@@ -28,6 +28,10 @@ export const marketCfg = (cfg: Settings): MarketCfg => ({
   sensitivity: cfg.n("space.price_sensitivity"), delayMin: cfg.n("space.offer_delay_min_h"), delayMax: cfg.n("space.offer_delay_max_h"),
 });
 
+/** Space decisions waiting for the manager: new free-space windows, conflicts and offers (used by "Next event"). */
+export const spaceDecisionsWaiting = (): number =>
+  (db().prepare(`SELECT (SELECT COUNT(*) FROM space_forecasts WHERE state IN ('NEW','CONFLICT')) + (SELECT COUNT(*) FROM space_offers WHERE status='PENDING') n`).get() as { n: number }).n;
+
 /** A refused action with a message the UI shows in the user's language. */
 export class SpaceError extends UserError {}
 export { M };

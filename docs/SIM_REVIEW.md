@@ -30,6 +30,10 @@ Severity: **critical** = the simulation stops working or shows wrong business nu
 | m4 | minor | "cannot order: no room" is Critical right after the order was approved | `lib/agents/alerts.ts` (NO_ROOM) | fixed (`1e3f0a2`) |
 | m5 | minor | Arabic "لمدة ٦ شهر" (wrong number–noun agreement) | `scripts/locales_space.py`, `lib/render.ts` | fixed (`b38ba98`) |
 | m6 | minor | a corrupt `smartstock.db` makes every request fail; `npm run seed` cannot recover | `lib/db.ts` | fixed (`81348f7`) |
+| m7 | minor | two different units (carboy, jerrycan) are both "gallon" in Arabic, spelled two ways | `scripts/locales_review.py` | fixed (`2b48ba9`) |
+| m8 | minor | "→" between two dates points backwards in the Arabic layout | `components/space/SpacePanels.tsx`, `PlanPanel.tsx`, `HowAgentsWork.tsx` | fixed (`96e7063`, test `f8f0b44`) |
+| m9 | minor | the top-bar menus stay open after an action (e.g. after *Start over*) | `components/TopBar.tsx` | fixed (`ec93571`); verified in the browser, no automated test (client-only) |
+| m10 | minor | the dev-mode Next.js badge covers the guided-demo panel in Arabic | `next.config.mjs` | fixed (`9e6a1d1`, `devIndicators: false`) |
 
 ### C1 — a settings value of the wrong type stops every tick (critical)
 
@@ -134,3 +138,18 @@ Severity: **critical** = the simulation stops working or shows wrong business nu
 * **Stock and money over a long run.** No negative stock, lot and item balances, budget periods without gaps, committed spend within budget + emergency spend: checked at every hour by the audit (30 days × 3 seeds), and every 10 days in a 400-day probe run with a manager who approves every order.
 * **Website and demo gate.** Not redesigned; trial sign-in, the redirect to `/login` without the cookie and `401` for the API were exercised by the existing tests and in the browser.
 * **Docs vs code.** "No LLM is called" is accurate for every decision: `lib/llm.ts` only polishes the wording of pending supplier messages, and only when `ANTHROPIC_API_KEY` is set and the manager presses *Run analysis*.
+
+### m7–m10 (minor, found while driving the app)
+
+* **m7** — the Arabic UI showed "٣٢ جالون" and "٩٤٣ غالون" side by side for two different units (carboy, jerrycan). A carboy is now "قارورة"; the test checks that no two units share a word (it treats غ/ج as the same letter, so it fails on the old texts).
+* **m8** — in the right-to-left layout a "→" between two dates points from the later date to the earlier one. A small `<To />` shows "←" in Arabic and "→" in English and is read as "to" / "إلى" by screen readers; a test forbids the hard-coded arrow (3 matches before the fix).
+* **m9** — *More ▾ → Start over* (and every other menu action) left the menu open over the screen. Menus now close when one of their buttons is used; typing in their number fields does not close them.
+* **m10** — `npm run dev` is the documented way to demo; its "N" indicator sat on top of the guided-demo panel (bottom-left in Arabic). It is switched off in `next.config.mjs` (error overlays still work).
+
+## Long run (400 simulated days)
+
+A probe run of 400 days (seed 42, auto-pause off, a manager who approves every pending order at 09:00) checked all hourly and daily invariants of `lib/audit.ts` every 10 days: **no failure**, no `NaN` / `Infinity` in the final snapshot, 15 budget periods renewed without gaps, 52,842 movements. This run used the code before the performance fixes (it measured the problem P1/P2 describes); the performance fixes do not change any number (P1 is bit-identical, P2 returns the same rows), which the audit fingerprints confirm.
+
+## Audit fingerprints
+
+`npm run audit` (30 days × seeds 42, 7, 2026) fingerprints the simulated movements, leases and offers. Only **M1** can change them: the audit adds a company on day 4, after the first listing was published, and that company's offer is no longer born expired. Old values (main, `5e649ea`) and new values are listed below once the audit has run on this branch.

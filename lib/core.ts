@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { clockAt, type Clock } from "./clock";
+import { render } from "./render";
 
 export interface Msg { k: string; v?: Record<string, unknown> }
 export const M = (k: string, v?: Record<string, unknown>): Msg => ({ k, v });
@@ -27,7 +28,7 @@ export interface AgentResult { msg: Msg }
 
 /** A refused action; `msg` is shown to the user in their language. */
 export class UserError extends Error {
-  constructor(public msg: Msg) { super(msg.k); }
+  constructor(public msg: Msg) { super(render("en", msg)); } // readable in logs and the API's "error" field; the UI renders `msg` in the chosen language
 }
 
 export function getSim(): SimState {

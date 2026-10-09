@@ -9,6 +9,7 @@ import { addMovement, issueFefo, receiveGoods, totalOnHand } from "./stock";
 import { runAll, runScheduled } from "./agents/coordinator";
 import { seedDatabase } from "./seed";
 import { spaceHour } from "./space/market";
+import { spaceDecisionsWaiting } from "./space/common";
 
 /** Plans the demand of one day: daily quantity per item (seeded), then split over 24 hours. Stored in demand_log. */
 function ensureDemandPlan(cfg: Settings, day: number, date: string, items: Item[]) {
@@ -140,8 +141,7 @@ const important = (e: Ev) => e.meta?.pause === true || IMPORTANT_EVENTS.has(e.ty
 export function decisionsWaiting(): number {
   const d = db(), t = getSim().tick;
   const recs = (d.prepare(`SELECT payload FROM recommendations WHERE status='PENDING'`).all() as { payload: string }[]).filter((r) => !((JSON.parse(r.payload).snooze_until ?? 0) > t)).length;
-  const space = (d.prepare(`SELECT (SELECT COUNT(*) FROM space_forecasts WHERE state IN ('NEW','CONFLICT')) + (SELECT COUNT(*) FROM space_offers WHERE status='PENDING') n`).get() as { n: number }).n;
-  return recs + space;
+  return recs + spaceDecisionsWaiting();
 }
 
 /** Server-side loop for "run N hours", "jump to next day", "jump to next critical event" and "jump to the next important event". */
