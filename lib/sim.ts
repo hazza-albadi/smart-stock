@@ -118,6 +118,7 @@ export function tick(o: { expected?: number; auto?: boolean } = {}): TickResult 
     runScheduled();
     const keep = cfg.n("log.keep_agent_runs");
     d.prepare(`DELETE FROM agent_runs WHERE id <= (SELECT COALESCE(MAX(id),0) FROM agent_runs) - ?`).run(keep);
+    d.prepare(`DELETE FROM agent_steps WHERE tick < COALESCE((SELECT MIN(tick) FROM agent_runs), 0)`).run(); // the stage log is kept as long as the runs it describes
   })();
 
   const movements = d.prepare(`SELECT m.seq, m.movement_id, m.date, m.tick, m.item_id, i.unit, m.movement_type, m.quantity, m.reference, m.balance_after, m.lot_id, m.actor

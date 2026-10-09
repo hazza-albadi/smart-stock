@@ -7,6 +7,7 @@ import { getSim, M, type Msg } from "../core";
 import { loadSettings, type Settings } from "../settings";
 import { marketCfg, logSpaceEvent, spaceDecision, SpaceError } from "./common";
 import { maxListable, minOver, projectZones, rawFree, type ZoneProj } from "./forecast";
+import { createSpaceDraft, dropDrafts } from "../drafts";
 
 export interface Listing { guaranteed: number; window_tick: number | null; id: number; zone_id: string; area: number; start_date: string; end_date: string; price: number; status: string; created_tick: number; published_tick: number | null; resumed_tick: number | null; closed_tick: number | null; note: string | null }
 export interface Offer {
@@ -72,6 +73,13 @@ export function evaluateOffer(cfg: Settings, o: Pick<Offer, "request_id" | "area
   return { checks, can_accept: blockers.length === 0, blockers, suggest };
 }
 
+/** The reason given to the company: the first automatic check that failed (or warned), else the manager's own reason. */
+function replyReason(ev: OfferEval, fallback: Msg | null, prefer?: string): Msg | null {
+  const named = prefer ? ev.checks.find((x) => x.key === prefer && x.level !== "ok") : undefined;
+  const c = named ?? ev.checks.find((x) => x.level === "bad") ?? ev.checks.find((x) => x.level === "warn");
+  return c ? c.msg : fallback;
+}
+
 // ---------------------------------------------------------------- leases
 function createLease(o: Offer, l: Listing, tick: number, terms: { area: number; start_date: string; end_date: string; price: number }): number {
   const d = db();
@@ -104,6 +112,7 @@ export function acceptOffer(offerId: number): { decisionId: number; leaseId: num
     d.prepare(`UPDATE space_offers SET status='ACCEPTED', decided_tick=? WHERE id=?`).run(s.tick, o.id);
     const decisionId = spaceDecision("OFFER", "ACCEPT", { zone: l.zone_id, listing: l.id, offer: o.id, lease: leaseId, detail: { area: o.area, start: o.start_date, end: o.end_date, price: o.price, company: o.company, per_day: dailyIncome(o.area, o.price, cfg.n("space.days_per_month")) } });
     logSpaceEvent("OFFER_ACCEPTED", M("ev.sp.accepted", { company: o.company, area: o.area, zone: l.zone_id, start: o.start_date, end: o.end_date }), "info", { actor: "user", ref: String(o.id) });
+    createSpaceDraft({ action: "accept", decisionId, company: o.company, zone: l.zone_id, area: o.area, start: o.start_date, end: o.end_date, price: o.price, leaseId });
     out = { decisionId, leaseId };
   })();
   return out;
@@ -121,6 +130,7 @@ export function rejectOffer(offerId: number, reason: string): { decisionId: numb
     d.prepare(`UPDATE space_offers SET status='REJECTED', decided_tick=?, reason=? WHERE id=?`).run(s.tick, r, o.id);
     const l = getListing(o.listing_id) as Listing;
     decisionId = spaceDecision("OFFER", "REJECT", { zone: l.zone_id, listing: l.id, offer: o.id, reason: r, detail: { company: o.company, area: o.area } });
+    createSpaceDraft({ action: "reject", decisionId, company: o.company, zone: l.zone_id, area: o.area, start: o.start_date, end: o.end_date, price: o.price, why: replyReason(evaluateOffer(loadSettings(), o, l), M(`sp.reject.${r}`), ({ price: "price", dates: "dates", area: "area", need: "needs" } as Record<string, string>)[r]) });
     logSpaceEvent("OFFER_REJECTED", M("ev.sp.rejected", { company: o.company, area: o.area }), "info", { actor: "user", ref: String(o.id) });
   })();
   return { decisionId };
@@ -145,6 +155,7 @@ export function counterOffer(offerId: number, t: Terms): { decisionId: number } 
     d.prepare(`UPDATE space_offers SET status='COUNTERED', counter=?, counter_due_tick=?, counter_n=?, decided_tick=? WHERE id=?`).run(JSON.stringify(t), s.tick + delay, n, s.tick, o.id);
     decisionId = spaceDecision("OFFER", "COUNTER", { zone: l.zone_id, listing: l.id, offer: o.id, detail: { company: o.company, from: { area: o.area, start: o.start_date, end: o.end_date, price: o.price }, to: t, answer_tick: s.tick + delay } });
     logSpaceEvent("OFFER_COUNTERED", M("ev.sp.countered", { company: o.company, area: t.area, price: t.price }), "info", { actor: "user", ref: String(o.id) });
+    createSpaceDraft({ action: "counter", decisionId, company: o.company, zone: l.zone_id, area: o.area, start: o.start_date, end: o.end_date, price: o.price, counter: { area: t.area, start: t.start_date, end: t.end_date, price: t.price }, why: replyReason(evaluateOffer(cfg, o, l), null) });
   })();
   return { decisionId };
 }
@@ -188,6 +199,7 @@ export function keepVacant(i: { zone_id: string; area: number; start_date: strin
   db().transaction(() => {
     decisionId = spaceDecision("KEEP_VACANT", "KEEP", { zone: i.zone_id, reeval, reason: (i.reason ?? "").slice(0, 200), detail: { area: i.area, start: i.start_date, end: i.end_date } });
     logSpaceEvent("KEEP_VACANT", M("ev.sp.kept", { area: i.area, zone: i.zone_id, until: reeval }), "info", { actor: "user" });
+    createSpaceDraft({ action: "vacant", decisionId, zone: i.zone_id, area: i.area, start: i.start_date, end: i.end_date, reeval, note: (i.reason ?? "").slice(0, 200), why: M("draft.sp.vacant.why") });
   })();
   return { decisionId };
 }
@@ -260,6 +272,7 @@ export function undoSpace(decisionId: number) {
       d.prepare(`UPDATE space_listings SET status='PUBLISHED', closed_tick=NULL WHERE id=? AND status='LEASED'`).run(lease.listing_id);
     } else throw new SpaceError(M("sp.err.cannot_undo"));
     d.prepare(`DELETE FROM space_decisions WHERE id=?`).run(dec.id);
+    dropDrafts(`space:${dec.id}`);
     logSpaceEvent("UNDO", M("ev.sp.undo"), "info", { actor: "user" });
   })();
   void s;

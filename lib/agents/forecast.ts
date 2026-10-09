@@ -1,9 +1,21 @@
+/**
+ * Name: Forecast (id: forecast)
+ * Stage: READ
+ * Role: Turns the movement history into weekly usage, a seasonal forecast and demand-anomaly flags for every item.
+ * Reads: items, stock_movements, demand_log, current_stock, purchase_orders_open, settings
+ * Writes: forecasts
+ * VERIFY: no negative or NaN value in any forecast; every item has a forecast (checks.forecastViolations)
+ * Runs when: setting schedule.forecast_hours (and after every decision)
+ * Hands over to: replenishment (through the forecasts table, via the coordinator)
+ */
 import { db } from "../db";
 import { addDays, diffDays } from "../time";
 import { seasonFactor, type SeasonCfg } from "../calc";
 import { getItems, getSim, logRun, M, type AgentResult } from "../core";
 import { loadSettings } from "../settings";
 import { loadLive } from "../live";
+import { forecastViolations, vcheck, type VCheck } from "../checks";
+import { countRows, type StageMsgs } from "./steps";
 
 /**
  * Total demand in [from, to]: stock issued (excluding expiry write-offs) PLUS demand that could not be served because the item was out of stock.
@@ -20,7 +32,7 @@ function outBetween(itemId: string, from: string, to: string): number {
   return issued + unmet;
 }
 
-/** Agent 1 (READ): weekly usage, seasonal forecast, demand anomaly. Stock-dependent figures (cover, stock-out) are always computed live. */
+/** Weekly usage, seasonal forecast, demand anomaly. Stock-dependent figures (cover, stock-out) are always computed live. */
 export function forecastAgent(group: string, trigger: string): AgentResult {
   const started = new Date().toISOString();
   const cfg = loadSettings();
@@ -75,3 +87,20 @@ export function forecastAgent(group: string, trigger: string): AgentResult {
   logRun(group, "forecast", trigger, started, res.msg);
   return res;
 }
+
+/** READ / REASON / ACT sentences of the last run (counts come from the tables). */
+export function forecastStages(res: AgentResult): StageMsgs {
+  const cfg = loadSettings();
+  const v = (res.msg.v ?? {}) as Record<string, unknown>;
+  return {
+    read: M("step.forecast.read", { items: countRows("items"), moves: countRows("stock_movements", "movement_type='OUT'"), weeks: cfg.n("forecast.horizon_weeks") }),
+    reason: M("step.forecast.reason", { anomalies: countRows("forecasts", "anomaly=1"), atRisk: Number(v.atRisk ?? 0) }),
+    act: M("step.forecast.act", { n: countRows("forecasts") }),
+  };
+}
+
+/** VERIFY: no negative or NaN values; every item has a forecast. */
+export const forecastVerify = (): VCheck[] => {
+  const bad = forecastViolations();
+  return [vcheck("forecast_values_valid", bad.filter((x) => !x.endsWith("no forecast"))), vcheck("forecast_covers_every_item", bad.filter((x) => x.endsWith("no forecast")))];
+};

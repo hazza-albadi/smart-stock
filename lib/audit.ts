@@ -5,18 +5,16 @@ import { dailyQuantity, demandMultiplier, type SeasonCfg, type EventCfg } from "
 import { snapshot } from "./snapshot";
 import { budgetInfo, budgetFor, periods } from "./budget";
 import { diffDays, addDays } from "./time";
-import { maxListableRaw } from "./space/forecast";
+import { near, fail, exceedsCapacity, capacityViolations, listedAreaViolations } from "./checks";
 import fs from "node:fs";
 import path from "node:path";
 import { parseCsv } from "./csv";
 
 export interface Check { name: string; ok: boolean; detail: string; flow?: "purchasing" | "space" | "both" }
 /** Checks that belong to the rental flow; every other check is purchasing (or shared stock/zone data). */
-const SPACE_CHECKS = new Set(["listing_gets_minimum_offers_in_window", "leased_plus_company_need_within_capacity", "listed_area_within_free_window", "income_equals_price_area_days", "no_offer_without_published_matching_listing", "space_decisions_timestamped_with_consequence", "no_offers_before_a_listing", "space_ui_matches_database"]);
+const SPACE_CHECKS = new Set(["listing_gets_minimum_offers_in_window", "leased_plus_company_need_within_capacity", "listed_area_within_free_window", "income_equals_price_area_days", "no_offer_without_published_matching_listing", "space_decisions_timestamped_with_consequence", "no_offers_before_a_listing", "space_ui_matches_database", "every_space_decision_has_a_reply_draft"]);
 const all = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).all(...a) as T[];
 const one = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).get(...a) as T;
-const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps * Math.max(1, Math.abs(a), Math.abs(b));
-const fail = (rows: string[]) => (rows.length ? rows.slice(0, 5).join("; ") + (rows.length > 5 ? ` … (+${rows.length - 5})` : "") : "ok");
 
 /** Cheap invariants that must hold after EVERY simulated hour. */
 export function hourlyInvariants(): Check[] {
@@ -94,7 +92,7 @@ export function hourlyInvariants(): Check[] {
     if (!s) { bad.push(`${z.zone_id} missing`); continue; }
     if (!near(s.used, used)) bad.push(`${z.zone_id} used ${s.used} vs ${used}`);
     if (!near(s.net, net)) bad.push(`${z.zone_id} rentable ${s.net} vs ${net}`);
-    if (used + z.ten > z.cap + 1e-6 && !(z.ten > 0 && one(`SELECT 1 FROM alerts WHERE key=? AND active=1`, `LEASE_OVER:${z.zone_id}`))) bad.push(`${z.zone_id} above capacity: ${used + z.ten} > ${z.cap}`);
+    if (exceedsCapacity(used, z.ten, z.cap) && !(z.ten > 0 && one(`SELECT 1 FROM alerts WHERE key=? AND active=1`, `LEASE_OVER:${z.zone_id}`))) bad.push(`${z.zone_id} above capacity: ${used + z.ten} > ${z.cap}`);
     if (z.ra !== "yes" && s.net !== 0) bad.push(`${z.zone_id} not rentable but shows ${s.net}`);
   }
   if (!near(snap.zones.reduce((a, z) => a + z.used, 0), sumUsed)) bad.push("sum of zones used differs from warehouse total");
@@ -105,23 +103,10 @@ export function hourlyInvariants(): Check[] {
   const sp = snap.space;
   const cfg = loadSettings();
   const dpm = cfg.n("space.days_per_month");
-  // leased area + the company's own need (fixed + stock held there) never exceeds the zone capacity at any hour
-  const cap: string[] = [];
-  for (const z of all(`SELECT w.zone_id, w.capacity_m2 c, w.fixed_occupied_m2_aisles_equipment f,
-      COALESCE((SELECT SUM(x.quantity_on_hand*i.space_m2_per_unit) FROM current_stock x JOIN items i ON i.item_id=x.item_id WHERE x.zone_id=w.zone_id),0) st,
-      COALESCE((SELECT SUM(area) FROM space_leases WHERE zone_id=w.zone_id AND status IN ('RESERVED','ACTIVE') AND start_date<=? AND ?<end_date),0) ls FROM warehouse_zones w`, snap.sim.date, snap.sim.date))
-    if (z.f + z.st + z.ls > z.c + 1e-6 && !one(`SELECT 1 FROM alerts WHERE key=? AND active=1`, `LEASE_OVER:${z.zone_id}`)) cap.push(`${z.zone_id}: leased ${Math.round(z.ls)} + need ${Math.round(z.f + z.st)} > ${z.c}`);
-  add("leased_plus_company_need_within_capacity", cap);
+  // leased area + the company's own need (fixed + stock held there) never exceeds the zone capacity at any hour (shared with the agents' VERIFY stage)
+  add("leased_plus_company_need_within_capacity", capacityViolations(snap.sim.date));
   // listed area never exceeds what the forecast leaves free (otherwise a conflict must be flagged)
-  const lst: string[] = [];
-  const flagged = new Set(all(`SELECT inputs FROM space_forecasts WHERE state='CONFLICT'`).map((r) => JSON.parse(r.inputs).listing_id));
-  for (const l of all(`SELECT * FROM space_listings WHERE status IN ('DRAFT','PUBLISHED','PAUSED')`)) {
-    const rest = l.area - one(`SELECT COALESCE(SUM(area),0) a FROM space_leases WHERE listing_id=?`, l.id).a;
-    const room = maxListableRaw(cfg, l.zone_id, l.start_date < snap.sim.date ? snap.sim.date : l.start_date, l.end_date, l.id);
-    if (rest > room + (rest * cfg.n("space.conflict_tolerance_pct")) / 100 + 1e-6 && !flagged.has(l.id)) lst.push(`listing ${l.id}: ${rest} m² listed, forecast leaves ${room}`);
-    if (rest > 0 && l.status === "PUBLISHED" && l.published_tick === null) lst.push(`listing ${l.id} published without a time`);
-  }
-  add("listed_area_within_free_window", lst);
+  add("listed_area_within_free_window", listedAreaViolations(cfg, snap.sim.date));
   // income = price x area x days leased
   const inc: string[] = [];
   for (const l of all(`SELECT * FROM space_leases`)) {
@@ -188,6 +173,17 @@ export function hourlyInvariants(): Check[] {
     if (d.kind === "SUPPLIER_MSG" && det.effect !== "none") db_.push(`decision ${d.id}: message decision without explicit no-effect`);
   }
   add("decisions_timestamped_with_consequence", db_);
+
+  // agents: every run is in the stage log with all four stages (READ, REASON, ACT, VERIFY); every approved order has its supplier message draft; every space decision its reply
+  add("every_agent_run_has_four_stages", [
+    ...all(`SELECT r.g, r.a FROM (SELECT DISTINCT run_group g, agent a FROM agent_runs) r WHERE NOT EXISTS (SELECT 1 FROM agent_steps s WHERE s.run_group=r.g AND s.agent=r.a)`).map((r) => `${r.a} @ ${r.g}: no stages logged`),
+    ...all(`SELECT run_group g, agent a, attempt t, COUNT(DISTINCT stage) n FROM agent_steps GROUP BY run_group, agent, attempt HAVING n<>4`).map((r) => `${r.a} @ ${r.g} attempt ${r.t}: ${r.n} of 4 stages`),
+  ]);
+  add("agents_pass_their_own_checks", all(`SELECT agent, summary FROM agent_steps WHERE stage='VERIFY' AND ok=0 AND tick=?`, getSim().tick).map((r) => `${r.agent}: ${r.summary}`));
+  add("every_approved_po_has_a_draft", all(`SELECT json_extract(detail,'$.po') po FROM decisions WHERE kind='PO' AND decision='APPROVED'
+    AND json_extract(detail,'$.po') NOT IN (SELECT ref FROM drafts WHERE kind='SUPPLIER_ORDER')`).map((r) => `order ${r.po}: no supplier message draft`));
+  add("every_space_decision_has_a_reply_draft", all(`SELECT id, kind, action FROM space_decisions WHERE (kind='OFFER' AND action IN ('ACCEPT','REJECT','COUNTER')) OR kind='KEEP_VACANT'`)
+    .filter((r) => !one(`SELECT 1 FROM drafts WHERE kind='SPACE_REPLY' AND ref=?`, `space:${r.id}`)).map((r) => `space decision ${r.id} (${r.kind} ${r.action}): no reply draft`));
 
   // clock
   const s = getSim();

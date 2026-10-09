@@ -13,7 +13,7 @@ export interface ZoneProj {
 }
 
 /** Remaining area of a listing that is still on offer (area minus what was already leased from it). */
-const LISTING_REMAINING = `MAX(0, l.area - COALESCE((SELECT SUM(x.area) FROM space_leases x WHERE x.listing_id=l.id AND x.status IN ('RESERVED','ACTIVE','ENDED')), 0))`;
+export const LISTING_REMAINING = `MAX(0, l.area - COALESCE((SELECT SUM(x.area) FROM space_leases x WHERE x.listing_id=l.id AND x.status IN ('RESERVED','ACTIVE','ENDED')), 0))`;
 
 /**
  * Space the company itself will need, per rentable zone and per day, for the next `space.forecast_days` days:
@@ -141,101 +141,4 @@ export interface WindowRow {
   held_until: string | null; to_horizon: number; pending_area: number; pending_note: string | null; inputs: Record<string, unknown>;
 }
 
-/** The Space Forecast agent: windows of space the company will NOT need, plus the periods that are blocked and why. */
-export function spacePlanAgent(group: string, trigger: string): AgentResult {
-  const started = new Date().toISOString();
-  const d = db();
-  const cfg = loadSettings();
-  const sim = getSim();
-  const today = sim.sim_date;
-  const margin = cfg.n("space.safety_margin_pct");
-  const wc = windowCfg(cfg);
-  const proj = projectZones(cfg);
-  const keyOf = (r: { zone_id: string; start_date: string; to_horizon: number; end_date: string; state: string }) => `${r.state}|${r.zone_id}|${r.start_date}|${r.to_horizon ? "H" : r.end_date}`;
-  const before = new Map((d.prepare(`SELECT zone_id, start_date, end_date, to_horizon, state, first_tick FROM space_forecasts`).all() as { zone_id: string; start_date: string; end_date: string; to_horizon: number; state: string; first_tick: number }[]).map((r) => [keyOf(r), r.first_tick]));
-  const vacant = d.prepare(`SELECT * FROM space_decisions WHERE kind='KEEP_VACANT' AND reeval_date>?`).all(today) as { zone_id: string; reeval_date: string; detail: string }[];
-  const growth = cfg.n("space.reopen_growth_pct");
-  const rows: WindowRow[] = [];
-
-  for (const p of proj.values()) {
-    const series = listableSeries(p, margin, cfg.b("space.rule_pending_blocks_listing"));
-    const pend = listableSeries(p, margin, true);
-    const ws = freeWindows(p.dates, series, wc, (x) => addDays(x, 1));
-    const horizonEnd = addDays(p.dates[p.dates.length - 1], 1);
-    for (const w of ws) {
-      const k0 = diffDays(w.start, p.dates[0]), k1 = Math.max(k0, diffDays(w.end, p.dates[0]) - 1);
-      const days = Array.from({ length: k1 - k0 + 1 }, (_, i) => k0 + i);
-      const peakNeed = Math.max(...days.map((k) => p.need[k]));
-      const leasedMax = Math.max(...days.map((k) => p.leased[k]));
-      const listedMax = Math.max(...days.map((k) => p.listed[k]));
-      const pendShort = Math.max(0, w.area - Math.min(...days.map((k) => pend[k])));
-      const firstPend = pendShort > 0 ? days.find((k) => pend[k] < w.area) : undefined;
-      const drivers = p.drivers.filter((x) => !x.pending && x.arrival < w.end).slice(0, 3);
-      const draft = pendShort > 0 ? p.drivers.filter((x) => x.pending && x.arrival < w.end)[0] : undefined;
-      const held = vacant.find((v) => v.zone_id === p.zone_id && v.reeval_date > today && JSON.parse(v.detail).start < w.end && w.start < JSON.parse(v.detail).end
-        && w.area < JSON.parse(v.detail).area * (1 + growth / 100));
-      rows.push({
-        zone_id: p.zone_id, start_date: w.start, end_date: w.end, area: w.area,
-        confidence: confidenceOf(diffDays(w.toHorizon ? horizonEnd : w.end, today), cfg.n("space.confidence_high_days"), cfg.n("space.confidence_medium_days")),
-        state: held ? "HELD" : "NEW", held_until: held?.reeval_date ?? null, to_horizon: w.toHorizon ? 1 : 0,
-        pending_area: pendShort, pending_note: draft ? JSON.stringify(M("sp.pending_warn", { item: draft.item_id, qty: draft.qty, area: draft.area, date: firstPend !== undefined ? p.dates[firstPend] : draft.arrival })) : null,
-        inputs: { capacity: p.capacity, fixed: p.fixed, buffer: p.buffer, peak_need: peakNeed, leased: leasedMax, listed: listedMax, margin, window_free: w.area, drivers },
-      });
-    }
-    // blocked periods: days where less than the smallest block is listable, with the orders that need the space
-    let runStart = -1, count = 0;
-    for (let k = 0; k <= series.length && count < 3; k++) {
-      const blocked = k < series.length && series[k] < wc.minBlock;
-      if (blocked && runStart < 0) runStart = k;
-      if (!blocked && runStart >= 0) {
-        const start = p.dates[runStart], end = k === series.length ? addDays(p.dates[k - 1], 1) : p.dates[k];
-        const dr = p.drivers.filter((x) => !x.pending && x.arrival <= end).slice(0, 3);
-        const peak = Math.max(...p.need.slice(runStart, k));
-        rows.push({ zone_id: p.zone_id, start_date: start, end_date: end, area: 0, confidence: "high", state: "BLOCKED", held_until: null, to_horizon: k === series.length ? 1 : 0, pending_area: 0, pending_note: null,
-          inputs: { capacity: p.capacity, peak_need: peak, leased: Math.max(...p.leased.slice(runStart, k)), listed: Math.max(...p.listed.slice(runStart, k)), margin, drivers: dr } });
-        runStart = -1; count++;
-      }
-    }
-  }
-
-  // listings that the company's own (approved) purchases now squeeze: shortfall per listing, with the order that needs the space
-  const lst = d.prepare(`SELECT l.id, l.zone_id, l.start_date, l.end_date, ${LISTING_REMAINING} AS rest FROM space_listings l WHERE l.status IN ('DRAFT','PUBLISHED','PAUSED') ORDER BY l.id`).all() as
-    { id: number; zone_id: string; start_date: string; end_date: string; rest: number }[];
-  for (const l of lst) {
-    const p = proj.get(l.zone_id);
-    if (!p || l.rest <= 0) continue;
-    const earlier = (k: number) => lst.filter((x) => x.id < l.id && x.zone_id === l.zone_id && x.start_date <= p.dates[k] && p.dates[k] < x.end_date).reduce((a, x) => a + x.rest, 0);
-    const to = l.end_date < addDays(p.dates[p.dates.length - 1], 1) ? l.end_date : addDays(p.dates[p.dates.length - 1], 1);
-    const from = l.start_date > today ? l.start_date : today;
-    if (from >= to) continue;
-    const avail = Math.max(0, Math.floor(minOver(p, from, to, (k) => rawFree(p, k) - earlier(k))));
-    const tol = (l.rest * cfg.n("space.conflict_tolerance_pct")) / 100; // forecast noise is not a conflict
-    if (l.rest <= avail + tol + 1e-6) {
-      // pending purchase suggestions never block a listing, but they are shown as a warning
-      const availP = Math.max(0, Math.floor(minOver(p, from, to, (k) => Math.max(0, p.capacity - p.needPending[k] - p.leased[k]) - earlier(k))));
-      const dr = p.drivers.filter((x) => x.pending && x.arrival < to).sort((a, b) => b.area - a.area)[0];
-      if (l.rest > availP + 1e-6 && dr) rows.push({ zone_id: l.zone_id, start_date: dr.arrival > from ? dr.arrival : from, end_date: to, area: l.rest - availP, confidence: "high", state: "WARN", held_until: null, to_horizon: 0, pending_area: 0, pending_note: null, inputs: { listing_id: l.id, rest: l.rest, draft: dr } });
-      continue;
-    }
-    let first = from;
-    for (let dt = from; dt < to; dt = addDays(dt, 1)) { const k = diffDays(dt, p.dates[0]); if (rawFree(p, k) - earlier(k) < l.rest) { first = dt; break; } }
-    // the cause of a new squeeze is most likely the order placed last; otherwise the largest one that arrives in time
-    const cands = p.drivers.filter((x) => !x.pending && x.arrival < to && x.arrival <= addDays(first, 1));
-    const drv = [...(cands.length ? cands : p.drivers.filter((x) => !x.pending && x.arrival < to))].sort((a, b) => b.ordered - a.ordered || b.area - a.area)[0];
-    rows.push({ zone_id: l.zone_id, start_date: first, end_date: to, area: l.rest - avail, confidence: "high", state: "CONFLICT", held_until: null, to_horizon: 0, pending_area: 0, pending_note: null,
-      inputs: { listing_id: l.id, rest: l.rest, ok_area: avail, driver: drv ?? null } });
-  }
-
-  d.transaction(() => {
-    d.prepare(`DELETE FROM space_forecasts`).run();
-    const st = d.prepare(`INSERT INTO space_forecasts(zone_id,start_date,end_date,area,confidence,inputs,state,held_until,to_horizon,pending_area,pending_note,updated_tick,first_tick) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-    for (const r of rows) st.run(r.zone_id, r.start_date, r.end_date, r.area, r.confidence, JSON.stringify(r.inputs), r.state, r.held_until, r.to_horizon, r.pending_area, r.pending_note, sim.tick, before.get(keyOf(r)) ?? sim.tick);
-  })();
-  void logSpaceEvent;
-
-  const wins = rows.filter((r) => r.state === "NEW");
-  const res: AgentResult = { msg: M("run.spaceplan", { windows: wins.length, area: wins.reduce((a, r) => a + r.area, 0), held: rows.filter((r) => r.state === "HELD").length, days: cfg.n("space.forecast_days") }) };
-  logRun(group, "spaceplan", trigger, started, res.msg);
-  return res;
-}
 export type { Msg };

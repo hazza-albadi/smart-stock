@@ -11,6 +11,8 @@ import { KpiStrip, RiskList } from "./RiskPanel";
 import FeedPanel, { type FeedMove } from "./FeedPanel";
 import StockTable from "./StockTable";
 import AgentPanel, { type Analysis } from "./AgentPanel";
+import DraftsPanel from "./DraftsPanel";
+import SummaryCard from "./SummaryCard";
 import PlanPanel from "./PlanPanel";
 import ImpactPanel from "./ImpactPanel";
 import ManualPanel from "./ManualPanel";
@@ -261,6 +263,7 @@ export default function Dashboard() {
   const { T, R, N } = api;
 
   const decidedCount = useSnap((s) => s.sim.decided) ?? 0;
+  const unsent = useSnap((s) => s.drafts.filter((d) => d.flow === section && !d.sent).length) ?? 0;
   const tick = useSnap((s) => s.sim.tick) ?? 0;
 
   if (!ready) {
@@ -274,8 +277,8 @@ export default function Dashboard() {
   }
 
   const moreTabs = (section === "space"
-    ? [{ id: "history", label: T("tab.history") }, { id: "agents", label: T("tab.agents") }, { id: "settings", label: T("tab.settings") }]
-    : [{ id: "plan", label: T("tab.plan") }, { id: "history", label: T("tab.history") }, { id: "agents", label: T("tab.agents") }, { id: "manual", label: T("tab.manual") }, { id: "settings", label: T("tab.settings") }]);
+    ? [{ id: "history", label: T("tab.history") }, { id: "drafts", label: T("tab.drafts"), badge: unsent ? N(unsent) : undefined }, { id: "agents", label: T("tab.agents") }, { id: "settings", label: T("tab.settings") }]
+    : [{ id: "plan", label: T("tab.plan") }, { id: "history", label: T("tab.history") }, { id: "drafts", label: T("tab.drafts"), badge: unsent ? N(unsent) : undefined }, { id: "agents", label: T("tab.agents") }, { id: "manual", label: T("tab.manual") }, { id: "settings", label: T("tab.settings") }]);
 
   const curTab = moreTabs.some((x) => x.id === tab) ? tab : moreTabs[0].id;
   return (
@@ -328,10 +331,12 @@ export default function Dashboard() {
             )}
 
             <section id="more" className="card scroll-mt-24 overflow-hidden" aria-label={T("more.title")}>
+              <SummaryCard />
               <Tabs label={T("more.title")} value={curTab} onChange={setTab} tabs={moreTabs} />
               <div id={`panel-${curTab}`} role="tabpanel" aria-labelledby={`tab-${curTab}`}>
                 {curTab === "plan" && section === "purchasing" && <PlanPanel />}
                 {curTab === "history" && <ImpactPanel key={section} flow={section} version={`${Math.floor(tick / 6)}-${decidedCount}`} />}
+                {curTab === "drafts" && <DraftsPanel />}
                 {curTab === "agents" && <AgentPanel analysis={analysis} onAnalyse={analyse} />}
                 {curTab === "manual" && section === "purchasing" && <ManualPanel />}
                 {curTab === "settings" && <SettingsPanel auditing={auditing} onAudit={audit} />}

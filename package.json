@@ -12,7 +12,8 @@
     "check": "tsx scripts/check.ts",
     "literals": "tsx scripts/literals.ts",
     "baseline": "tsx scripts/baseline.ts",
-    "locales": "python scripts/locales_messages.py && python scripts/locales_ui.py && python scripts/locales_wording.py && python scripts/locales_space.py && python scripts/locales_budget.py && python scripts/locales_offers.py",
+    "locales": "python scripts/locales_messages.py && python scripts/locales_ui.py && python scripts/locales_wording.py && python scripts/locales_space.py && python scripts/locales_budget.py && python scripts/locales_offers.py && python scripts/locales_agents.py",
+    "docs:agents": "tsx scripts/docs-agents.ts",
     "doctor": "node scripts/check-env.mjs",
     "req:update": "node scripts/make-req.mjs"
   },

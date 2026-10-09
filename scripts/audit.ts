@@ -1,5 +1,5 @@
 // npm run audit [days] [seed ...]  — number audit over a multi-day simulation for several seeds, on a throw-away database.
-// Fails loudly (exit code 1) when an invariant is broken. Writes docs/audit-report.json and docs/hourly-vs-daily.md.
+// Fails loudly (exit code 1) when an invariant is broken. Writes docs/reports/audit-report.json and docs/reports/hourly-vs-daily.md.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -74,7 +74,7 @@ function runSeed(seed: number, label: string) {
   seedDatabase({ overrides: { "sim.seed": seed } });
   runAll({ group: "start", trigger: "start" });
   const failures: Failure[] = [];
-  const baseline = JSON.parse(fs.readFileSync(path.join(process.cwd(), "docs", "baseline.json"), "utf8")).day0;
+  const baseline = JSON.parse(fs.readFileSync(path.join(process.cwd(), "docs", "reports", "baseline.json"), "utf8")).day0;
   for (const m of diff(baseline, JSON.parse(JSON.stringify(readDay0State())))) failures.push({ seed, tick: 0, check: "day0_equals_baseline", detail: m });
   let checks = 0;
   const record = (tk: number, list: { name: string; ok: boolean; detail: string }[]) => {
@@ -122,10 +122,10 @@ const failures = results.flatMap((r) => r.failures);
 if (!deterministic) failures.push({ seed: seeds[0], tick: -1, check: "same_seed_same_result", detail: `${results[0].out.fingerprint} vs ${again.out.fingerprint}` });
 if (!different) failures.push({ seed: -1, tick: -1, check: "different_seed_different_result", detail: results.map((r) => r.out.fingerprint).join(",") });
 
-fs.mkdirSync("docs", { recursive: true });
-fs.writeFileSync("docs/hourly-vs-daily.md", md);
+fs.mkdirSync("docs/reports", { recursive: true });
+fs.writeFileSync("docs/reports/hourly-vs-daily.md", md);
 const report = { days, seeds, runs: results.map((r) => r.out), determinism: { same_seed_same_result: deterministic, different_seed_different_result: different }, failures };
-fs.writeFileSync("docs/audit-report.json", JSON.stringify(report, null, 2));
+fs.writeFileSync("docs/reports/audit-report.json", JSON.stringify(report, null, 2));
 closeDb();
 for (const r of [...results, again]) for (const ext of ["", "-wal", "-shm"]) fs.rmSync(r.out.db + ext, { force: true });
 

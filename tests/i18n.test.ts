@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import en from "../locales/en.json";
 import ar from "../locales/ar.json";
+import { AGENT_IDS } from "../lib/agents/registry";
 
 const E = en as Record<string, string>, A = ar as Record<string, string>;
 const walk = (d: string, out: string[] = []) => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, f.name); if (f.isDirectory()) walk(p, out); else if (/\.(ts|tsx)$/.test(f.name)) out.push(p); } return out; };
@@ -27,7 +28,7 @@ test("dynamic key families are complete", () => {
   const need = ["st.Critical", "st.Low", "st.OK", "st.Overstock", "st.Expiring", "sev.Critical", "sev.High", "sev.Monitor", "sev.Info",
     "plan.FUNDED", "plan.PARTIAL", "plan.DEFERRED", "plan.OVERSTOCK", "plan.REJECTED", "kind.PO", "kind.SUPPLIER_MSG",
     "dec.APPROVE", "dec.REJECT", "dec.PARTIAL", "lease.ACTIVE", "lease.RESERVED", "lease.ENDED", "mk.receipt", "mk.issue", "mk.adjust",
-    "agent.forecast", "agent.replenishment", "agent.space", "agent.alerts", "agent.spaceplan", "fund.FUNDED", "fund.PARTIAL", "fund.NEEDS_EXTRA", "fund.DEFERRED", "alert.prop.BUDGET_LOW", "alert.prop.UNFUNDED_CRITICAL", "alert.prop.NO_OFFERS", "alert.prop.NO_ROOM", "sp.cmp.fit_inside", "sp.cmp.fit_partly", "sp.cmp.fit_fits", "sp.cmp.fit_too_big", "sp.cmp.risk_none", "sp.cmp.risk_watch", "sp.cmp.risk_blocked", "impact.sp.head.listing_reprice", "impact.sp.e.listing_reprice",
+    ...AGENT_IDS.map((a) => `agent.${a}`), "fund.FUNDED", "fund.PARTIAL", "fund.NEEDS_EXTRA", "fund.DEFERRED", "alert.prop.BUDGET_LOW", "alert.prop.UNFUNDED_CRITICAL", "alert.prop.NO_OFFERS", "alert.prop.NO_ROOM", "sp.cmp.fit_inside", "sp.cmp.fit_partly", "sp.cmp.fit_fits", "sp.cmp.fit_too_big", "sp.cmp.risk_none", "sp.cmp.risk_watch", "sp.cmp.risk_blocked", "impact.sp.head.listing_reprice", "impact.sp.e.listing_reprice",
     "nav.purchasing", "nav.space_flow", "po.OPEN", "po.DELAYED_BY_SUPPLIER",
     "alert.prop.STOCKOUT", "alert.prop.DELAYED_PO", "alert.prop.ANOMALY", "alert.prop.EXPIRY", "alert.prop.SAFETY_LOW", "alert.prop.OVERSTOCK", "alert.prop.LISTING_RISK", "alert.prop.LEASE_OVER", "alert.prop.LEASE_LIMITS_PO", "alert.prop.DECISION_OVERDUE", "alert.prop.SPACE_OVER",
     "sp.conf.high", "sp.conf.medium", "sp.conf.low", "sp.level.ok", "sp.level.warn", "sp.level.bad", "sp.chk.type", "sp.chk.area", "sp.chk.dates", "sp.chk.duration", "sp.chk.price", "sp.chk.needs",

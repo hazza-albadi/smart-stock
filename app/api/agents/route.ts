@@ -1,17 +1,19 @@
 import { handle, body } from "@/lib/api";
 import { snapshot } from "@/lib/snapshot";
-import { AGENT_ORDER, runAgent, type AgentName } from "@/lib/agents/coordinator";
+import { runAgent, finishAnalysis } from "@/lib/agents/coordinator";
+import { AGENT_ORDER, isAgentId } from "@/lib/agents/registry";
 import { polishPendingMessages } from "@/lib/llm";
 
 export const dynamic = "force-dynamic";
 
-/** Runs ONE agent per call ("Run analysis" calls the five in order so they can be shown one after another). */
+/** Runs ONE agent per call ("Run analysis" calls the five in registry order so they can be shown one after another); the last call also writes the summary. */
 export async function POST(req: Request) {
   const b = await body(req);
   return handle(async () => {
-    if (!AGENT_ORDER.includes(b.agent)) throw new Error("unknown agent");
-    const result = runAgent(b.agent as AgentName, b.group ?? `manual#${Date.now()}`, "manual");
+    if (!isAgentId(b.agent)) throw new Error("unknown agent");
+    const result = runAgent(b.agent, b.group ?? `manual#${Date.now()}`, "manual");
     if (b.agent === "alerts") await polishPendingMessages();
+    if (b.agent === AGENT_ORDER[AGENT_ORDER.length - 1]) finishAnalysis();
     return { result, snapshot: snapshot() };
   });
 }

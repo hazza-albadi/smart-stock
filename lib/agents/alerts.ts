@@ -1,3 +1,13 @@
+/**
+ * Name: Alerts (id: alerts)
+ * Stage: ACT
+ * Role: Raises a warning for every risk (what is wrong, why, and what happens if ignored) and drafts supplier messages for critical and high ones.
+ * Reads: forecasts, items, current_stock, purchase_orders_open, replenishment_plan, zone_space, purchasing_budget, recommendations, suppliers
+ * Writes: alerts, recommendations, events
+ * VERIFY: every active alert has a known kind, severity and a what / why / if-ignored message; no active key twice (checks.alertViolations)
+ * Runs when: setting schedule.alerts_hours (and after every decision)
+ * Hands over to: space-forecast (through the alerts table, via the coordinator)
+ */
 import { db } from "../db";
 import { addDays, diffDays } from "../time";
 import { getSim, logRun, logEvent, upsertRec, M, type AgentResult, type Item, type Msg, type Severity } from "../core";
@@ -6,8 +16,12 @@ import { loadLive } from "../live";
 import { coverHours } from "../calc";
 import { budgetInfo } from "../budget";
 import { computeZones } from "../zones";
+import { alertViolations, vcheck, type VCheck } from "../checks";
+import { countRows, type StageMsgs } from "./steps";
 
 const SEV_ORDER: Severity[] = ["Critical", "High", "Monitor", "Info"];
+/** Every alert kind that can exist: the ones raised here plus the three raised by the Space Forecast agent. */
+export const ALERT_KINDS: ReadonlySet<string> = new Set(["STOCKOUT", "DELAYED_PO", "ANOMALY", "OVERSTOCK", "EXPIRY", "SAFETY_LOW", "SPACE_OVER", "LEASE_LIMITS_PO", "DECISION_OVERDUE", "BUDGET_LOW", "UNFUNDED_CRITICAL", "NO_ROOM", "LISTING_RISK", "LEASE_OVER", "NO_OFFERS"]);
 const EVENT_SEV = { Critical: "critical", High: "high", Monitor: "info", Info: "info" } as const;
 
 interface A {
@@ -20,7 +34,7 @@ const evOpts = (a: { key: string; kind: string; severity: Severity; flow?: "purc
 const lastsH = (l: { onHand: number; weeklyUsage: number }) => coverHours(l.onHand, l.weeklyUsage);
 const hrs = (h: number) => Math.max(0, Math.round(h));
 
-/** Agent 4 (ACT): raises alerts (what / why / what happens if ignored) and drafts supplier messages for critical/high supplier issues. */
+/** Raises alerts (what / why / what happens if ignored) and drafts supplier messages for critical/high supplier issues. */
 export function alertAgent(group: string, trigger: string): AgentResult {
   const started = new Date().toISOString();
   const d = db();
@@ -266,4 +280,21 @@ export function alertAgent(group: string, trigger: string): AgentResult {
   const res: AgentResult = { msg: M("run.alerts", { total: alerts.length, critical: count("Critical"), high: count("High"), monitor: count("Monitor"), info: count("Info"), fresh: newCount, drafts: keepMsg.size }) };
   logRun(group, "alerts", trigger, started, res.msg);
   return res;
+}
+
+/** READ / REASON / ACT sentences of the last run. */
+export function alertsStages(res: AgentResult): StageMsgs {
+  const v = (res.msg.v ?? {}) as Record<string, number>;
+  return {
+    read: M("step.alerts.read", { items: countRows("items"), pos: countRows("purchase_orders_open", "status IN ('OPEN','DELAYED_BY_SUPPLIER')"), zones: countRows("zone_space") }),
+    reason: M("step.alerts.reason", { total: v.total ?? 0, critical: v.critical ?? 0, high: v.high ?? 0 }),
+    act: M("step.alerts.act", { active: countRows("alerts", "active=1"), fresh: v.fresh ?? 0, drafts: v.drafts ?? 0 }),
+  };
+}
+
+/** VERIFY: the active alerts are complete and unique. */
+export function alertsVerify(): VCheck[] {
+  const rows = (db().prepare(`SELECT key, kind, severity, title, detail, ignore_msg FROM alerts WHERE active=1`).all() as Record<string, string | null>[])
+    .map((r) => ({ key: r.key as string, kind: r.kind as string, severity: r.severity as string, title: JSON.parse(r.title as string), detail: JSON.parse(r.detail as string), ignore_msg: r.ignore_msg ? JSON.parse(r.ignore_msg) : null }));
+  return [vcheck("alerts_complete_and_unique", alertViolations(rows, ALERT_KINDS, SEV_ORDER))];
 }

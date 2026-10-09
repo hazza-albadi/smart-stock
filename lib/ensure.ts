@@ -1,6 +1,8 @@
-import { db } from "./db";
+import { db, ensureTables } from "./db";
 import { seedDatabase, defaultSettings } from "./seed";
 import { runAll } from "./agents/coordinator";
+import { backfillDrafts } from "./drafts";
+import { writeSummary } from "./summary";
 
 /** First request after a fresh checkout: build the database from the CSVs if `npm run seed` was not run. */
 export function ensureSeeded() {
@@ -16,4 +18,8 @@ export function ensureSeeded() {
   const have = new Set((db().prepare(`SELECT key FROM settings`).all() as { key: string }[]).map((r) => r.key));
   const add = defaultSettings().filter((d) => !have.has(d.key));
   if (add.length) db().transaction(() => { for (const d of add) db().prepare(`INSERT INTO settings(key,value,unit,description) VALUES(?,?,?,?)`).run(d.key, JSON.stringify(d.value), d.unit, d.description); })();
+  // tables added by a newer version (stage log, daily summary, drafts): created without touching any data, then filled from what already exists
+  const created = ensureTables();
+  if (created.includes("drafts")) backfillDrafts();
+  if (created.includes("daily_summary")) writeSummary("start");
 }

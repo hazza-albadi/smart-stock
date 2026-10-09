@@ -1,4 +1,4 @@
-// Generates docs/baseline.json from the database (never typed by hand).
+// Generates docs/reports/baseline.json from the database (never typed by hand).
 //   npx tsx scripts/baseline.ts            -> seeds a fresh DB, records the day-0 state + command results
 //   npx tsx scripts/baseline.ts --state    -> prints only the day-0 state (used by tests / audit)
 import fs from "node:fs";
@@ -26,8 +26,8 @@ function main() {
   seedDatabase();
   runAll({ group: "start", trigger: "start" });
   const out = { generated_by: "scripts/baseline.ts", commands, day0: state };
-  fs.mkdirSync(path.join(process.cwd(), "docs"), { recursive: true });
-  fs.writeFileSync(path.join(process.cwd(), "docs", "baseline.json"), JSON.stringify(out, null, 2));
-  console.log("wrote docs/baseline.json", commands.map((c) => `${c.name}:${c.ok ? "ok" : "FAIL"}`).join(" "));
+  fs.mkdirSync(path.join(process.cwd(), "docs", "reports"), { recursive: true });
+  fs.writeFileSync(path.join(process.cwd(), "docs", "reports", "baseline.json"), JSON.stringify(out, null, 2));
+  console.log("wrote docs/reports/baseline.json", commands.map((c) => `${c.name}:${c.ok ? "ok" : "FAIL"}`).join(" "));
 }
 main();

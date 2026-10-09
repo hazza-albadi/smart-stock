@@ -22,9 +22,9 @@ const fresh = () => { seedDatabase({ overrides: { "sim.auto_pause_critical": fal
 before(() => { for (const e of ["", "-wal", "-shm"]) fs.rmSync(file + e, { force: true }); useDatabase(file); });
 test.after(() => { closeDb(); for (const e of ["", "-wal", "-shm"]) fs.rmSync(file + e, { force: true }); });
 
-test("day 0 hour 0 equals docs/baseline.json (generated from the data by scripts/baseline.ts)", () => {
+test("day 0 hour 0 equals docs/reports/baseline.json (generated from the data by scripts/baseline.ts)", () => {
   fresh();
-  const baseline = JSON.parse(fs.readFileSync("docs/baseline.json", "utf8")).day0;
+  const baseline = JSON.parse(fs.readFileSync("docs/reports/baseline.json", "utf8")).day0;
   assert.deepEqual(JSON.parse(JSON.stringify(readDay0State())), baseline);
 });
 

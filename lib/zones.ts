@@ -1,6 +1,5 @@
 import { db } from "./db";
 import { zoneFigures } from "./calc";
-import { getSim, logRun, M, type AgentResult } from "./core";
 
 export interface Lease { id: number; request_id: string; company: string; zone_id: string; area: number; start_date: string; end_date: string; status: string }
 
@@ -37,25 +36,4 @@ export function computeZones(): ZoneRow[] {
       free: f.free, rentable: f.rentableGross, allocated: f.allocated, over_capacity: f.overCapacity, net: f.rentableNet, not_rentable: f.notRentable,
     };
   });
-}
-
-/** Agent 3 (REASON): used / reserved / rentable area per zone, recomputed from live stock; tenants of active leases are subtracted. */
-export function spaceAgent(group: string, trigger: string): AgentResult {
-  const started = new Date().toISOString();
-  const d = db();
-  const sim = getSim();
-  const rows = computeZones();
-  d.transaction(() => {
-    d.prepare(`DELETE FROM zone_space`).run();
-    const st = d.prepare(`INSERT INTO zone_space VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
-    for (const z of rows) st.run(z.zone_id, z.capacity, z.fixed, z.stock_used, z.used, z.reserved, z.rent_allowed, z.free, z.rentable, z.allocated, z.over_capacity, sim.tick);
-  })();
-  const rentable = rows.reduce((a, z) => a + z.net, 0);
-  const reserved = (d.prepare(`SELECT COALESCE(SUM(area),0) a FROM space_leases WHERE status='RESERVED'`).get() as { a: number }).a;
-  const res: AgentResult = {
-    msg: M("run.space", { rentable, detail: rows.filter((z) => z.rent_allowed).map((z) => `${z.zone_id} ${Math.round(z.net)}`).join(" + "),
-      allocated: rows.reduce((a, z) => a + z.allocated, 0), reserved, over: rows.reduce((a, z) => a + z.over_capacity, 0) }),
-  };
-  logRun(group, "space", trigger, started, res.msg);
-  return res;
 }

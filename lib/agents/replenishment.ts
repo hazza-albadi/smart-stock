@@ -1,3 +1,13 @@
+/**
+ * Name: Replenishment (id: replenishment)
+ * Stage: REASON
+ * Role: Decides which items need an order, how much, and in which order of priority within the free budget and the room of each zone; proposes purchase-order drafts.
+ * Reads: forecasts, items, current_stock, purchase_orders_open, purchasing_budget, warehouse_zones, space_leases, recommendations
+ * Writes: replenishment_plan, recommendations, events
+ * VERIFY: every draft quantity is above zero and a multiple of the unit step; funded drafts stay within the free budget plus the emergency room; no draft exceeds the room of its zone (checks.draftViolations)
+ * Runs when: setting schedule.replenishment_hours (and after every decision)
+ * Hands over to: space-optimization (through replenishment_plan and the PO drafts, via the coordinator)
+ */
 import { db } from "../db";
 import { addDays } from "../time";
 import { reorderPoint, demandOver, poWithin, roundUpTo } from "../calc";
@@ -7,6 +17,8 @@ import { loadLive, type Live } from "../live";
 import { zoneRoomBase } from "../stock";
 import { leasedOn } from "../zones";
 import { budgetInfo } from "../budget";
+import { draftViolations, vcheck, type DraftRow, type VCheck } from "../checks";
+import { countRows, type StageMsgs } from "./steps";
 
 export { budgetInfo };
 
@@ -44,7 +56,7 @@ export function roomModel(cfg: ReturnType<typeof loadSettings>, live: Map<string
   return { roomAt, pools, roomUnits, promise };
 }
 
-/** Agent 2 (REASON): reorder point, order quantity and budget-constrained prioritisation. Proposes PO drafts. */
+/** Reorder point, order quantity and budget-constrained prioritisation. Proposes PO drafts. */
 export function replenishmentAgent(group: string, trigger: string): AgentResult {
   const started = new Date().toISOString();
   const d = db();
@@ -215,4 +227,29 @@ export function replenishmentAgent(group: string, trigger: string): AgentResult 
   const res: AgentResult = { msg: M("run.repl", { n: cands.length, funded, newCost, deferred, remaining, startRemaining, skipped: skipped.length }) };
   logRun(group, "replenishment", trigger, started, res.msg);
   return res;
+}
+
+/** READ / REASON / ACT sentences of the last run. */
+export function replenishmentStages(res: AgentResult): StageMsgs {
+  const v = (res.msg.v ?? {}) as Record<string, number>;
+  return {
+    read: M("step.replenishment.read", { items: countRows("items"), pos: countRows("purchase_orders_open", "status IN ('OPEN','DELAYED_BY_SUPPLIER')"), free: v.startRemaining ?? 0 }),
+    reason: M("step.replenishment.reason", { n: v.n ?? 0, funded: v.funded ?? 0, deferred: v.deferred ?? 0, skipped: v.skipped ?? 0 }),
+    act: M("step.replenishment.act", { plan: countRows("replenishment_plan"), drafts: countRows("recommendations", "kind='PO' AND status='PENDING' AND source='agent'"), cost: v.newCost ?? 0 }),
+  };
+}
+
+/** VERIFY: the drafts the agent just wrote (quantity, step, budget, room). */
+export function replenishmentVerify(): VCheck[] {
+  const cfg = loadSettings();
+  const sim = getSim();
+  const now = { date: sim.sim_date, hour: sim.hour };
+  const bud = budgetInfo();
+  const round = cfg.j<Record<string, number>>("repl.round_to");
+  const items = new Map((db().prepare(`SELECT * FROM items`).all() as Item[]).map((i) => [i.item_id, i]));
+  const rows = (db().prepare(`SELECT payload FROM recommendations WHERE kind='PO' AND status='PENDING' AND source='agent'`).all() as { payload: string }[]).map((r) => JSON.parse(r.payload));
+  const drafts: DraftRow[] = rows.map((p) => ({ item_id: p.item_id, unit: p.unit, qty: p.qty, cost: p.cost, funding: p.funding, within_limit: !!p.funding_info?.within_limit, edited: !!p.edited }));
+  const room = roomModel(cfg, loadLive(cfg, now), now);
+  const bad = draftViolations(drafts, { free: bud.free, emergencyRoom: bud.emergencyRoom, step: (u) => round[u] ?? 1, roomUnits: (id) => (items.get(id) ? room.roomUnits(items.get(id) as Item) : 0) });
+  return [vcheck("drafts_valid_and_within_budget_and_room", bad)];
 }

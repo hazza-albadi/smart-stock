@@ -20,7 +20,7 @@ Layout stability (CLS and geometry at 0.5 s per simulated hour): `jitter.md`.
 
 ## Day-0 baseline: what is the same and what changed
 
-Same (checked by the test "day 0 hour 0 equals docs/baseline.json" and by the audit): stock per item, forecasts, the replenishment plan, budget (18,000 OMR total, committed and free), alerts, the pending purchase recommendations, and the
+Same (checked by the test "day 0 hour 0 equals docs/reports/baseline.json" and by the audit): stock per item, forecasts, the replenishment plan, budget (18,000 OMR total, committed and free), alerts, the pending purchase recommendations, and the
 **physical empty space: 1,400 m² (Z1 500 m², Z5 900 m²)** in the zone table and in the Space KPI "Empty today".
 
 Changed (and why):

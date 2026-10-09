@@ -9,6 +9,7 @@ import { recContext, roomModel } from "./agents/replenishment";
 import { budgetInfo, recordTopup, removeTopup } from "./budget";
 import { runAll } from "./agents/coordinator";
 import { issueFefo, receiveGoods, totalOnHand } from "./stock";
+import { createPoDraft, dropDrafts } from "./drafts";
 
 interface RecRow { id: number; key: string; kind: string; item_id: string | null; request_id: string | null; payload: string; status: string; created_tick: number }
 
@@ -88,6 +89,7 @@ export function decide(id: number, decision: "APPROVED" | "REJECTED", opts: Deci
           logEvent("BUDGET_TOPUP", it.item_id, M("ev.budget_topup", { po: r.poId, amount: extra, item: it.item_id }), "high", { ref: r.poId, actor: "user" });
         }
         ref = r.poId;
+        createPoDraft(r.poId); // the ready-to-send order message for the supplier
         detail = { po: r.poId, qty, suggested: p.suggested_qty ?? p.qty, cost: r.cost, arrival: r.arrival, hour: r.hour, over_budget: false, emergency_spend: extra, room_units: roomUnits, capped_from: capped, manual: p.status === "MANUAL", cover: ctx?.cover, stockout_hours: ctx?.stockout_hours };
         logEvent("PO_APPROVED", it.item_id, M("ev.po_approved", { po: r.poId, qty, unit: it.unit, item: it.item_id, cost: r.cost, date: r.arrival, hour: r.hour }), "info", { ref: r.poId, actor: "user" });
         d.prepare(`UPDATE recommendations SET status='APPROVED', decided_tick=?, key=key||'#'||id, payload=? WHERE id=?`).run(s.tick, JSON.stringify({ ...p, qty, cost: r.cost, po_id: r.poId }), id);
@@ -139,6 +141,7 @@ export function undo(decisionId: number) {
       const po = d.prepare(`SELECT * FROM purchase_orders_open WHERE po_id=?`).get(det.po) as { status: string } | undefined;
       if (!po || po.status !== "OPEN") throw new Error("the order has already arrived or changed");
       d.prepare(`DELETE FROM purchase_orders_open WHERE po_id=?`).run(det.po);
+      dropDrafts(det.po);
       removeTopup(det.po);
       const base = rec.key.replace(/#\d+$/, "");
       d.prepare(`DELETE FROM recommendations WHERE key=? AND id<>?`).run(base, rec.id);

@@ -25,7 +25,23 @@ export function useDatabase(file: string) { dbFile = file; }
 const TABLES = ["items", "suppliers", "stock_movements", "current_stock", "stock_opening", "purchase_orders_open", "purchasing_budget",
   "warehouse_zones", "space_requests", "agent_runs", "events", "recommendations", "decisions", "sim_state", "sim_baseline", "forecasts",
   "replenishment_plan", "zone_space", "alerts", "settings", "leases", "demand_log", "audit_results",
-  "space_forecasts", "space_listings", "space_offers", "space_leases", "space_decisions", "budget_topups"];
+  "space_forecasts", "space_listings", "space_offers", "space_leases", "space_decisions", "budget_topups", "agent_steps", "daily_summary", "drafts"];
+
+/** Tables added after the first release: created by the schema and, for an existing database, by ensureTables() without touching any data. */
+export const STAGE_TABLES = `
+CREATE TABLE IF NOT EXISTS agent_steps(id INTEGER PRIMARY KEY AUTOINCREMENT, run_group TEXT, agent TEXT, attempt INTEGER DEFAULT 1, stage TEXT, summary TEXT, tick INTEGER, sim_date TEXT, ok INTEGER DEFAULT 1);
+CREATE INDEX IF NOT EXISTS idx_steps_run ON agent_steps(run_group, agent);
+CREATE TABLE IF NOT EXISTS daily_summary(id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER, sim_date TEXT, trigger TEXT, data TEXT);
+CREATE TABLE IF NOT EXISTS drafts(id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, flow TEXT, ref TEXT, to_name TEXT, subject TEXT, parts TEXT, body_override TEXT, sent INTEGER DEFAULT 0, created_tick INTEGER, sent_tick INTEGER, meta TEXT);
+`;
+
+/** Migration for a database created before the stage log / summary / drafts existed. Returns the tables it had to create. */
+export function ensureTables(): string[] {
+  const d = db();
+  const missing = ["agent_steps", "daily_summary", "drafts"].filter((t) => !d.prepare(`SELECT 1 FROM sqlite_master WHERE name=?`).get(t));
+  if (missing.length) d.exec(STAGE_TABLES);
+  return missing;
+}
 
 export const SCHEMA = TABLES.map((t) => `DROP TABLE IF EXISTS ${t};`).join(" ") + `
 CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, unit TEXT, description TEXT);
@@ -85,4 +101,4 @@ CREATE TABLE space_decisions(id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER,
   offer_id INTEGER, lease_id INTEGER, reeval_date TEXT, reason TEXT, detail TEXT);
 CREATE TABLE demand_log(day INTEGER, item_id TEXT, hour INTEGER, planned REAL, issued REAL DEFAULT 0, PRIMARY KEY(day, item_id, hour));
 CREATE TABLE audit_results(id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER, ts TEXT, kind TEXT, passed INTEGER, total INTEGER, failures TEXT, by_flow TEXT);
-`;
+` + STAGE_TABLES;

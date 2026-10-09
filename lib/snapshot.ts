@@ -5,7 +5,10 @@ import { loadSettings } from "./settings";
 import { loadLive } from "./live";
 import { statusOf, ex, demandOver, coverHours, type Explain, type Status } from "./calc";
 import { budgetInfo, periods, budgetFor } from "./budget";
-import { AGENT_ORDER } from "./agents/coordinator";
+import { AGENT_ORDER, REGISTRY } from "./agents/registry";
+import { lastVerifies } from "./agents/steps";
+import { latestSummary } from "./summary";
+import { listDrafts } from "./drafts";
 import { computeZones } from "./zones";
 import { spaceSnapshot } from "./space/snapshot";
 import { llmEnabled } from "./llm";
@@ -86,6 +89,15 @@ export function snapshot() {
 
   const zones = computeZones();
   const runs = all(`SELECT * FROM agent_runs ORDER BY id DESC LIMIT 120`).map((r) => ({ ...r, summary: JSON.parse(r.summary) }));
+  // stage log of the latest run groups (READ / REASON / ACT / VERIFY per agent), the registry status of every agent, the daily summary and the drafts
+  const groups = (all(`SELECT run_group g FROM agent_steps GROUP BY run_group ORDER BY MAX(id) DESC LIMIT ?`, cfg.n("ui.agent_groups")) as { g: string }[]).map((x) => x.g);
+  const steps = groups.length ? all(`SELECT id, run_group, agent, attempt, stage, summary, tick, ok FROM agent_steps WHERE run_group IN (${groups.map(() => "?").join(",")}) ORDER BY id`, ...groups).map((r) => ({ ...r, summary: JSON.parse(r.summary) })) : [];
+  const verifies = lastVerifies();
+  const lastRun = new Map((all(`SELECT agent, MAX(id) id FROM agent_runs GROUP BY agent`) as { agent: string; id: number }[]).map((r) => [r.agent, r.id]));
+  const agents = REGISTRY.map((a) => {
+    const run = lastRun.has(a.id) ? all(`SELECT tick, sim_date, trigger, summary FROM agent_runs WHERE id=?`, lastRun.get(a.id))[0] : null;
+    return { id: a.id, hours: cfg.j<number[]>(a.scheduleKey), last_run: run ? { ...run, summary: JSON.parse(run.summary) } : null, verify: verifies[a.id] ?? null };
+  });
   const events = all(`SELECT * FROM events WHERE id IN (SELECT id FROM events WHERE flow IN ('purchasing','both') ORDER BY id DESC LIMIT ?) OR id IN (SELECT id FROM events WHERE flow IN ('space','both') ORDER BY id DESC LIMIT ?) ORDER BY id DESC`, cfg.n("ui.feed_page_size"), cfg.n("ui.feed_page_size")).map((e) => ({ ...e, msg: JSON.parse(e.msg), meta: e.meta ? JSON.parse(e.meta) : null }));
   const recent = all(`SELECT m.seq, m.date, m.tick, m.item_id, i.unit, m.movement_type, m.quantity, m.reference, m.balance_after, m.lot_id, m.actor
     FROM stock_movements m JOIN items i ON i.item_id=m.item_id WHERE m.sim=1 ORDER BY m.seq DESC LIMIT ?`, cfg.n("ui.feed_page_size"));
@@ -138,7 +150,7 @@ export function snapshot() {
       { label: "ex.in.buffer", value: z.reserved, unit: "m²", source: "warehouse_zones" },
       { label: "ex.in.leases_active", value: z.allocated, unit: "m²", source: "leases" },
     ], z.net, "m²") })),
-    agent_order: AGENT_ORDER, llm: llmEnabled(),
+    agent_order: AGENT_ORDER, steps, agents, summary: latestSummary(), drafts: listDrafts(cfg.n("ui.draft_page_size")), llm: llmEnabled(),
   };
 }
 export type Snapshot = ReturnType<typeof snapshot>;

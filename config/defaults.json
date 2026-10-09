@@ -435,6 +435,44 @@
     "description": "Older agent_runs rows are pruned."
   },
   {
+    "key": "agents.verify_retries",
+    "value": 1,
+    "unit": "int",
+    "description": "How many times an agent is run again when its own VERIFY check fails (then a visible warning is raised)."
+  },
+  {
+    "key": "summary.hours",
+    "value": [
+      8
+    ],
+    "unit": "hours",
+    "description": "Hours of the day after which the coordinator writes the daily summary card (also after Run analysis and at the start)."
+  },
+  {
+    "key": "summary.top_risks",
+    "value": 3,
+    "unit": "int",
+    "description": "How many top risks the daily summary lists."
+  },
+  {
+    "key": "ui.agent_groups",
+    "value": 8,
+    "unit": "int",
+    "description": "How many of the latest agent runs show their READ / REASON / ACT / VERIFY steps in the Agent panel."
+  },
+  {
+    "key": "ui.draft_page_size",
+    "value": 40,
+    "unit": "rows",
+    "description": "How many of the latest drafts (supplier orders, replies to companies) the Drafts tab loads."
+  },
+  {
+    "key": "summary.keep",
+    "value": 30,
+    "unit": "rows",
+    "description": "Older daily summaries are pruned."
+  },
+  {
     "key": "ui.feed_page_size",
     "value": 60,
     "unit": "rows",

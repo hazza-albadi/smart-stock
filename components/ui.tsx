@@ -127,7 +127,7 @@ export function Term({ k, children }: { k: string; children: ReactNode }) {
   );
 }
 
-export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, onClose, children, wide, xl }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; xl?: boolean }) {
   const { T } = useApp();
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -137,7 +137,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className={`relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-t-2xl border border-line bg-surface shadow-2xl sm:rounded-2xl ${wide ? "sm:max-w-2xl" : "sm:max-w-md"}`}>
+      <div className={`relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-t-2xl border border-line bg-surface shadow-2xl sm:rounded-2xl ${xl ? "sm:max-w-5xl" : wide ? "sm:max-w-2xl" : "sm:max-w-md"}`}>
         <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
           <h2 className="text-base font-bold">{title}</h2>
           <button type="button" onClick={onClose} aria-label={T("close")} className="min-h-10 min-w-10 rounded-lg border border-line text-lg hover:border-brand">✕</button>
