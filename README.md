@@ -40,7 +40,7 @@ npm run dev      # http://localhost:3000 (website); press "Trial sign-in" on /lo
 
 **In the app:** *More → Agents* shows each run with its four stages and a pass / fail mark per agent; *Help → How the agents work* shows the flow, one card per agent and where you approve; *More → Drafts* holds the supplier order and the replies to companies; the card at the top of *More* is the daily summary.
 
-**Architecture and demo.** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (diagram, agent table, who writes which table, schedule, the two flows, human-in-the-loop points, file map; Arabic summary on top). The [2-minute demo script](#2-minute-demo-script-also-inside-the-app-help--2-minute-demo) is below and inside the app (*Help → 2-minute demo*). Other documents: [`docs/README.md`](docs/README.md).
+**Architecture and demo.** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (diagram, agent table, who writes which table, schedule, the two flows, human-in-the-loop points, file map; Arabic summary on top). The [2-minute demo script](#2-minute-demo-script-also-inside-the-app-help--2-minute-demo) is below and inside the app (*Help → 2-minute demo*). Other documents: [`docs/README.md`](docs/README.md). The simulation review (every bug found, how it was reproduced and fixed, and the tests that guard it): [`docs/SIM_REVIEW.md`](docs/SIM_REVIEW.md).
 
 ---
 
@@ -87,7 +87,7 @@ Requires Node 22 or newer (`.nvmrc`). `npm run doctor` checks the environment.
 | `npm run locales` | regenerates `locales/en.json` and `locales/ar.json` from the `scripts/locales_*.py` scripts (run in order; the last one, `locales_agents.py`, holds the agent-stage, summary and draft texts) |
 | `npm run check [hours]` | prints the acceptance picture (day 0, or after N hours) rendered in English |
 | `npm run literals` | repo-wide search for hard-coded item/zone/request/PO ids, budget and rate literals in `app/`, `components/`, `lib/` |
-| `npm run docs:agents` | regenerates the agent tables of this README and of `docs/ARCHITECTURE.md` from `lib/agents/registry.ts` and the locales (`-- --check` only compares) |
+| `npm run docs:agents` | regenerates the agent tables of this README and of `docs/ARCHITECTURE.md` from `lib/agents/registry.ts` and the locales, and the settings table of this README from `config/defaults.json` (`-- --check` only compares) |
 | `npm run baseline` | regenerates `docs/reports/baseline.json` (day-0 state + tsc/build/check results) from a fresh DB — only run on purpose |
 | `npm run doctor` | checks Node, npm and the SQLite binary |
 
@@ -108,20 +108,20 @@ Under the sticky top bar, a **section switch** (Purchasing | Space) shows how ma
 3. **Listings and offers**, **Rentals and income**, the **Free-space forecast** (windows with formula, and why other periods cannot be listed), **Demand we cannot serve** (cold / hazardous companies, informational), and the Space activity feed.
 
 Everything else is in the tabbed **More** card of each section, which opens with the **daily summary** (top risks, decisions waiting and their age, budget used / free, space listable / leased / income, offers waiting): purchase plan, what happened after your decisions (both flows, each entry tagged), **Drafts** (the supplier order after you approve a purchase; the reply to the company after every space decision — edit, send yourself, mark as sent), **Agents** (the four stages of every agent per run), do-it-yourself actions, settings and the data check (counts per flow).
-The sticky top bar shows the date/time, running/paused and why, the speed in words, Start/Pause, +1 hour, Speed ▾ and More ▾ menus, Help (tour, 2-minute demo, glossary), language and theme.
+The sticky top bar shows the date/time, running/paused and why, the speed in words, Start/Pause, +1 hour, **Next event** (runs until something needs a look and says what it was), Speed ▾ and More ▾ menus, Help (tour, 2-minute demo, glossary), language and theme.
 
 ## 2-minute demo script (also inside the app: Help → 2-minute demo)
 
-1. Open http://localhost:3000, press **Trial sign-in** on the sign-in page (the workspace is at `/simulation`): **Mon 5 Oct 2026 – 00:00**. Read "Needs your decision" and "What is at risk". A first-run tour (6 steps) explains the screen (skippable).
+1. Open http://localhost:3000, press **Trial sign-in** on the sign-in page (the workspace is at `/simulation`): **Mon 5 Oct 2026 – 00:00**. Read "Needs your decision" and "What is at risk". A **guided demo** panel (6 steps: stock risk → purchase decision → free space → offer → income) sits in a corner; it never blocks the screen, *Show me* points at the right panel, each step is ticked when it really happens (minimise or close it; Help reopens it).
 2. Press **Start** (Speed ▾ lets you change *1 hour = 5 seconds*). Movements appear under "What happened recently".
 3. Frozen shrimp shells run out on 7 Oct: the clock **pauses itself** and says "Paused: critical event – decide now".
-4. In "Needs your decision" press the green button of the frozen-shrimp order. A toast offers **Undo**. The order arrives at its hour later; the budget drops now.
+4. In "Needs your decision" press the green button of the frozen-shrimp order. A toast offers **Undo**. The order arrives at its hour later; the budget drops now. A card **What changed after your decision** shows the five agents running again and what moved (budget, decisions waiting, risks, orders on the way).
 5. **Reject** another order and keep running: the shortage grows because nothing was ordered.
-6. **More ▾ → Jump to next day**, watch the delivery arrive.
+6. Press **Next event** (top bar): the clock runs until something needs a look, here the approved delivery arriving at its hour, and a toast says what it was. (*More ▾* still has *Jump to next day* and *Next critical event*.)
 7. Open **After your decisions**: each decision with what it led to, in plain sentences (tagged Purchasing / Space).
 8. **The space story.** Open the second tab, **Space**. The forecast shows free space we will *not* need (on day 0: about 770 m² in Z1 from early November and about 790 m² in Z5 from late October; the empty space today is 1,400 m²).
 9. Press **List 770 m² for 6 months at 4.000 OMR per m²**, check the price (an assumed figure) and publish. Nothing from the companies was visible before this.
-10. Press Start and wait one or two days: **offers arrive**. Read the six checks. Accept one, send a **counter-offer** (the form is prefilled with what still works) to another, **reject** the third.
+10. Press **Next event** until **offers arrive** (one or two simulated days). Read the six checks. Accept one, send a **counter-offer** (the form is prefilled with what still works) to another, **reject** the third.
 11. When the rental starts the area is held; rent is counted every day under *Rentals and income*; the impact log tells the story in sentences.
 12. Back in Purchasing approve a large order for a general-storage item: if it needs space you listed, a **warning appears in both sections** and the listing can be shrunk, paused or withdrawn. A signed rental is never cancelled.
 13. Open **More → Agents**: every run shows the five agents, each with its four stages (read, reason, act, verify) and a pass / fail mark for its own check. **Help → How the agents work** shows the flow and one card per agent.
@@ -130,7 +130,7 @@ The sticky top bar shows the date/time, running/paused and why, the speed in wor
 
 ## Agents and schedule (configurable in Settings)
 
-The five agents, their reads / writes and their schedule keys are in the table at the top and in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Defaults: Forecast daily 06:00; Replenishment and Space Optimization daily 08:00 and on demand (**Run analysis**); Alerts and Space Forecast every hour. After every decision of the manager the coordinator runs all five again.
+The five agents, their reads / writes and their schedule keys are in the table at the top and in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Defaults: Forecast daily 06:00; Replenishment and Space Optimization daily 08:00 and on demand (**Run analysis**); Alerts and Space Forecast every hour. After every decision of the manager (including postponing, changing a quantity and adding a company request) the coordinator runs all five again.
 After each run an agent's own check (VERIFY) runs: a failed check re-runs the agent once (`agents.verify_retries`), and a second failure shows a warning event and a red badge in the Agent panel — the simulation never stops because of it. The daily summary is written after the `summary.hours` hour (08:00), after **Run analysis** and at the start.
 
 The space *process* itself (offers arriving, offers expiring, counter-offers answered, leases starting / ending, rent accruing) is part of the hourly engine tick, not an agent.
@@ -151,7 +151,7 @@ stock-out projection, rentable space) are always computed live from the tables; 
 
 `POST /api/sim {action:"tick", expected, auto}`: the browser sends the tick it expects. A stale or duplicate request is **ignored**; auto ticks are also refused while paused or
 faster than the interval, so two tabs or a reload can never double-tick. The browser awaits each response before scheduling the next tick (no overlap). A reload resumes **paused**.
-*Run N hours / Next day / Next critical event* are server-side loops (capped by `sim.max_advance_hours`). **Auto-pause on critical** stops at the first critical event.
+*Run N hours / Next day / Next critical event / Next event* are server-side loops (capped by `sim.max_advance_hours`). **Auto-pause on critical** stops at the first critical event. *Next event* stops at the first hour with a critical or high alert, a delivery, a stock-out, an offer, a counter-offer answer, a lease starting or ending, a conflict, a budget renewal or a new decision waiting (`IMPORTANT_EVENTS` in `lib/sim.ts`). If a tick request fails, the browser pauses the clock and says so (it never shows *running* while nothing moves).
 
 ## Decisions change the course of the process
 
@@ -165,6 +165,10 @@ faster than the interval, so two tabs or a reload can never double-tick. The bro
 ## UX notes
 * No layout jitter while running (measured, `docs/ux/jitter-before.md` / `jitter-after.md`): per-panel subscriptions with structural sharing, fixed-height scroll cards, fixed overlays, transform-only feed animation, one request queue and sequence-numbered snapshots.
 * Walkthrough with before/after screenshots: `docs/ux/walkthrough.md`.
+* **Guided demo** (`components/DemoGuide.tsx`, steps and their done-rules in `lib/guide.ts`): a corner panel, never a modal; starts as a small pill on phones.
+* **Cause and effect** (`lib/changes.ts`, `components/ChangeSummary.tsx`): after every decision a card lists the agents that ran again and the numbers that moved, computed in the browser from the snapshots before and after.
+* **Who proposed it**: every suggestion card names its agent (Replenishment, Alerts, Space Forecast) and links to the agent log with its read / reason / act / verify stages.
+* Refusals and errors are shown in the chosen language (server faults are a logged 500 with a plain message); settings are checked before they are stored. Screenshots of the simulation screens: [`docs/screenshots/simulation/`](docs/screenshots/simulation).
 
 ## Number audit
 
