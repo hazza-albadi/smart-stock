@@ -119,7 +119,7 @@ W = {
 # errors
 "sp.err.offer_closed": ("This offer is no longer open: it was answered, expired or withdrawn.", "هذا العرض لم يعد مفتوحاً: تم الرد عليه أو انتهى أو سُحب."),
 "sp.err.listing_closed": ("This listing is no longer open.", "هذا الإعلان لم يعد مفتوحاً."),
-"sp.err.cannot_accept": ("The offer cannot be accepted as it is. {why} A counter-offer for {area:m2} may work.", "لا يمكن قبول العرض كما هو. {why:msg} قد ينجح عرض مضاد بمساحة {area:m2}."),
+"sp.err.cannot_accept": ("The offer cannot be accepted as it is. {why:msg} A counter-offer for {area:m2} may work.", "لا يمكن قبول العرض كما هو. {why:msg} قد ينجح عرض مضاد بمساحة {area:m2}."),
 "sp.err.bad_terms": ("Please check area, dates and price.", "يرجى مراجعة المساحة والتواريخ والسعر."),
 "sp.err.too_short": ("The rental is too short: at least {min:n0} days.", "مدة الإيجار قصيرة: الحد الأدنى {min:n0} يوماً."),
 "sp.err.never_rent": ("This zone is never rented out.", "هذه المنطقة لا تُؤجَّر أبداً."),
