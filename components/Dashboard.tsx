@@ -36,7 +36,9 @@ function queued<T>(fn: () => Promise<T>): Promise<T> {
 /** A refusal from the server; `msg` (when present) is a plain-language message the UI renders in the chosen language. */
 class ApiError extends Error { constructor(m: string, public msg?: Msg) { super(m); } }
 async function http<T>(url: string, body?: unknown, method = "POST"): Promise<T> {
-  const res = await fetch(url, body === undefined ? undefined : { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  let res: Response;
+  try { res = await fetch(url, body === undefined ? undefined : { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); }
+  catch (e) { throw new ApiError(String((e as Error).message ?? e), { k: "err.network" }); } // server stopped or unreachable
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError((j as { error?: string }).error ?? `${url} ${res.status}`, (j as { msg?: Msg }).msg);
   return j as T;
@@ -186,6 +188,10 @@ export default function Dashboard() {
       const res = await queued(() => http<any>(url, body, method));
       if (res && res.snapshot) setSnapshot(res.snapshot);
       return res;
+    } catch (e) {
+      // a refused action usually means the screen was stale (decided in another tab, offer expired): show the current state
+      if (e instanceof ApiError && e.msg?.k !== "err.network") await queued(() => http<Snapshot>("/api/state")).then(setSnapshot).catch(() => undefined);
+      throw e;
     } finally { setBusy(false); }
   }, []);
 
@@ -271,7 +277,7 @@ export default function Dashboard() {
       <div className="mx-auto max-w-[1500px] space-y-4 p-4" aria-busy="true">
         <div className="skeleton h-16 rounded-xl" />
         <div className="grid gap-4 lg:grid-cols-12"><div className="lg:col-span-7"><DecisionSkeleton /></div><div className="skeleton h-[480px] rounded-xl lg:col-span-5" /></div>
-        {error && <div role="alert" className="rounded-lg border border-crit bg-crit-soft px-3 py-2 text-sm text-crit">{typeof error === "string" ? error : ""}</div>}
+        {error && <div role="alert" className="rounded-lg border border-crit bg-crit-soft px-3 py-2 text-sm text-crit">{typeof error === "string" ? error : R(error)}</div>}
       </div>
     );
   }

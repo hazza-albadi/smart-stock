@@ -1,3 +1,4 @@
+import { M, UserError } from "@/lib/core";
 import { handle, body } from "@/lib/api";
 import { snapshot } from "@/lib/snapshot";
 import { runAgent, finishAnalysis } from "@/lib/agents/coordinator";
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const b = await body(req);
   return handle(async () => {
-    if (!isAgentId(b.agent)) throw new Error("unknown agent");
+    if (!isAgentId(b.agent)) throw new UserError(M("err.bad_action"));
     const result = runAgent(b.agent, b.group ?? `manual#${Date.now()}`, "manual");
     if (b.agent === "alerts") await polishPendingMessages();
     if (b.agent === AGENT_ORDER[AGENT_ORDER.length - 1]) finishAnalysis();

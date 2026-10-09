@@ -12,6 +12,8 @@ import { runAll } from "../lib/agents/coordinator";
 import { tick } from "../lib/sim";
 import { UserError } from "../lib/core";
 import { loadSettings, setSetting, settingProblem } from "../lib/settings";
+import { decide, postpone, editQty, manualMovement } from "../lib/decisions";
+import { handle } from "../lib/api";
 
 const file = path.join(os.tmpdir(), `smartstock-review-${process.pid}.db`);
 const q = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).all(...a) as T[];
@@ -53,4 +55,25 @@ test("M4: every text uses the same placeholders and formats in English and Arabi
   assert.deepEqual(bad, []);
 });
 
-void q;
+test("M2: refusals carry a message in the user's language; a real crash is a logged 500, not a 400", async () => {
+  fresh();
+  const r = q(`SELECT id FROM recommendations WHERE status='PENDING' AND kind='PO' ORDER BY id LIMIT 1`)[0];
+  decide(r.id, "APPROVED");
+  refusedWith(() => decide(r.id, "APPROVED"), "err.already_decided"); // double click / second tab
+  refusedWith(() => decide(999999, "APPROVED"), "err.not_found");
+  refusedWith(() => postpone(r.id), "err.already_decided");
+  refusedWith(() => editQty(r.id, 5), "err.not_pending");
+  refusedWith(() => manualMovement({ item: "nope", kind: "receipt", qty: 1, reason: "x" }), "err.unknown_item");
+  const item = q(`SELECT item_id FROM items ORDER BY item_id LIMIT 1`)[0].item_id;
+  refusedWith(() => manualMovement({ item, kind: "teleport" as "receipt", qty: 1, reason: "x" }), "err.bad_action");
+  refusedWith(() => manualMovement({ item, kind: "issue", qty: 1e9, reason: "x" }), "err.not_enough_stock");
+  const quiet = console.error; console.error = () => {};
+  try {
+    const crash = await handle(() => { throw new TypeError("boom"); });
+    assert.equal(crash.status, 500);
+    assert.equal((await crash.json()).msg.k, "err.server");
+    const refused = await handle(() => decide(r.id, "APPROVED"));
+    assert.equal(refused.status, 400);
+    assert.equal((await refused.json()).msg.k, "err.already_decided");
+  } finally { console.error = quiet; }
+});

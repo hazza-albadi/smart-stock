@@ -1,3 +1,4 @@
+import { M, UserError } from "@/lib/core";
 import { handle, body } from "@/lib/api";
 import { snapshot } from "@/lib/snapshot";
 import { tick, advance, setRunning, setIntervalMs, resetSim } from "@/lib/sim";
@@ -18,7 +19,7 @@ export async function POST(req: Request) {
       case "interval": setIntervalMs(Number(b.ms)); break;
       case "auto_pause": setSetting("sim.auto_pause_critical", !!b.value); break;
       case "reset": resetSim(); break;
-      default: throw new Error("unknown action");
+      default: throw new UserError(M("err.bad_action"));
     }
     return { result, snapshot: snapshot() };
   });

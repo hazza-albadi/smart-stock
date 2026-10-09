@@ -44,8 +44,8 @@ export interface DecideOpts { qty?: number; variant?: "primary" | "split"; area?
 export function decide(id: number, decision: "APPROVED" | "REJECTED", opts: DecideOpts = {}) {
   const d = db();
   const rec = d.prepare(`SELECT * FROM recommendations WHERE id=?`).get(id) as RecRow | undefined;
-  if (!rec) throw new Error("recommendation not found");
-  if (rec.status !== "PENDING") throw new Error("already decided");
+  if (!rec) throw new UserError(M("err.not_found"));
+  if (rec.status !== "PENDING") throw new UserError(M("err.already_decided"));
   const s = getSim();
   const p = JSON.parse(rec.payload);
   const ok = decision === "APPROVED";
@@ -115,7 +115,7 @@ export function decide(id: number, decision: "APPROVED" | "REJECTED", opts: Deci
 export function postpone(id: number, untilTick?: number) {
   const d = db();
   const rec = d.prepare(`SELECT * FROM recommendations WHERE id=?`).get(id) as RecRow | undefined;
-  if (!rec || rec.status !== "PENDING") throw new Error("only a pending recommendation can be postponed");
+  if (!rec || rec.status !== "PENDING") throw new UserError(M(rec ? "err.already_decided" : "err.not_found"));
   const s = getSim();
   const hours = untilTick !== undefined && untilTick > s.tick ? untilTick - s.tick : loadSettings().n("rec.postpone_hours");
   const p = JSON.parse(rec.payload);
@@ -130,16 +130,16 @@ export function postpone(id: number, untilTick?: number) {
 export function undo(decisionId: number) {
   const d = db();
   const dec = d.prepare(`SELECT * FROM decisions WHERE id=?`).get(decisionId) as { id: number; rec_id: number; kind: string; decision: string; detail: string; request_id: string | null } | undefined;
-  if (!dec || !dec.rec_id) throw new Error("this decision cannot be undone");
+  if (!dec || !dec.rec_id) throw new UserError(M("err.cannot_undo"));
   const rec = d.prepare(`SELECT * FROM recommendations WHERE id=?`).get(dec.rec_id) as RecRow | undefined;
-  if (!rec) throw new Error("this decision cannot be undone");
+  if (!rec) throw new UserError(M("err.cannot_undo"));
   const det = JSON.parse(dec.detail ?? "{}");
   const s = getSim();
   d.transaction(() => {
     const p = JSON.parse(rec.payload);
     if (dec.kind === "PO" && dec.decision === "APPROVED") {
       const po = d.prepare(`SELECT * FROM purchase_orders_open WHERE po_id=?`).get(det.po) as { status: string } | undefined;
-      if (!po || po.status !== "OPEN") throw new Error("the order has already arrived or changed");
+      if (!po || po.status !== "OPEN") throw new UserError(M("err.po_moved"));
       d.prepare(`DELETE FROM purchase_orders_open WHERE po_id=?`).run(det.po);
       dropDrafts(det.po);
       removeTopup(det.po);
@@ -150,7 +150,7 @@ export function undo(decisionId: number) {
     } else if (dec.decision === "REJECTED" || dec.kind === "SUPPLIER_MSG") {
       delete p.decision_ctx;
       d.prepare(`UPDATE recommendations SET status='PENDING', decided_tick=NULL, payload=? WHERE id=?`).run(JSON.stringify(p), rec.id);
-    } else throw new Error("this decision cannot be undone");
+    } else throw new UserError(M("err.cannot_undo"));
     d.prepare(`DELETE FROM decisions WHERE id=?`).run(dec.id);
     logEvent("UNDO", rec.item_id, M("ev.undo", { what: rec.kind, item: rec.item_id ?? "", req: rec.request_id ?? "" }), "info", { ref: rec.key, actor: "user" });
   })();
@@ -161,8 +161,8 @@ export function undo(decisionId: number) {
 export function editQty(id: number, qty: number) {
   const d = db();
   const rec = d.prepare(`SELECT * FROM recommendations WHERE id=?`).get(id) as RecRow | undefined;
-  if (!rec || rec.kind !== "PO" || rec.status !== "PENDING") throw new Error("only a pending PO draft can be edited");
-  if (!(qty >= 1)) throw new Error("quantity must be at least 1");
+  if (!rec || rec.kind !== "PO" || rec.status !== "PENDING") throw new UserError(M(rec ? "err.not_pending" : "err.not_found"));
+  if (!(qty >= 1)) throw new UserError(M("err.qty_min"));
   const p = JSON.parse(rec.payload);
   const prem = p.emergency ? loadSettings().n("po.emergency_premium") : 0;
   const before = p.qty;
@@ -178,8 +178,8 @@ export function editQty(id: number, qty: number) {
 export function createManualPo(itemId: string, qty: number, emergency: boolean) {
   const d = db();
   const it = getItems().find((i) => i.item_id === itemId);
-  if (!it) throw new Error("unknown item");
-  if (!(qty >= 1)) throw new Error("quantity must be at least 1");
+  if (!it) throw new UserError(M("err.unknown_item"));
+  if (!(qty >= 1)) throw new UserError(M("err.qty_min"));
   const cfg = loadSettings();
   const s = getSim();
   const lead = emergency ? Math.max(1, Math.round(it.lead_time_days * cfg.n("po.emergency_lead_factor"))) : it.lead_time_days;
@@ -205,22 +205,23 @@ export function manualMovement(o: { item: string; kind: "receipt" | "issue" | "a
   const d = db();
   const cfg = loadSettings();
   const it = getItems().find((i) => i.item_id === o.item);
-  if (!it) throw new Error("unknown item");
-  if (!o.reason.trim()) throw new Error("a reason is required");
+  if (!it) throw new UserError(M("err.unknown_item"));
+  if (!["receipt", "issue", "adjust"].includes(o.kind)) throw new UserError(M("err.bad_action"));
+  if (!o.reason.trim()) throw new UserError(M("err.reason_required"));
   const qty = Math.floor(o.qty);
-  if (!Number.isFinite(qty) || qty === 0 || (o.kind !== "adjust" && qty < 0)) throw new Error("invalid quantity");
+  if (!Number.isFinite(qty) || qty === 0 || (o.kind !== "adjust" && qty < 0)) throw new UserError(M("err.bad_qty"));
   const s = getSim();
   const ref = `MANUAL:${o.kind}:${o.reason.trim().slice(0, 60)}`;
   let moved = 0;
   d.transaction(() => {
     if (o.kind === "receipt" || (o.kind === "adjust" && qty > 0)) {
       const r = receiveGoods(cfg, it, Math.abs(qty), s.sim_date, `MAN${s.tick}`, "user");
-      if (r.got === 0) throw new Error("no room in the warehouse for this receipt");
+      if (r.got === 0) throw new UserError(M("err.no_room_receipt"));
       moved = r.got;
       d.prepare(`UPDATE stock_movements SET reference=? WHERE seq IN (SELECT seq FROM stock_movements WHERE tick=? AND actor='user' AND item_id=? AND reference=?)`).run(ref, s.tick, it.item_id, `MAN${s.tick}`);
     } else {
       const have = totalOnHand(it.item_id);
-      if (Math.abs(qty) > have) throw new Error("not enough stock");
+      if (Math.abs(qty) > have) throw new UserError(M("err.not_enough_stock", { have }));
       moved = issueFefo(it, Math.abs(qty), s.sim_date, ref, "user");
     }
     audit("MANUAL_MOVEMENT", { item: it.item_id, decision: o.kind.toUpperCase(), detail: { qty, moved, reason: o.reason } });
@@ -234,7 +235,7 @@ export function manualMovement(o: { item: string; kind: "receipt" | "issue" | "a
 export function createSpaceRequest(o: { company: string; type: string; area: number; months: number; from: string }) {
   const d = db();
   const s = getSim();
-  if (!o.company.trim() || !(o.area > 0) || !(o.months >= 1) || !/^\d{4}-\d{2}-\d{2}$/.test(o.from)) throw new Error("invalid request");
+  if (!o.company.trim() || !(o.area > 0) || !(o.months >= 1) || !/^\d{4}-\d{2}-\d{2}$/.test(o.from)) throw new UserError(M("err.bad_request"));
   const n = (d.prepare(`SELECT COUNT(*) c FROM space_requests WHERE source='MANUAL'`).get() as { c: number }).c + 1;
   const id = `NEW-${String(n).padStart(2, "0")}`;
   d.transaction(() => {
