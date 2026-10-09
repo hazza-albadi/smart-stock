@@ -260,3 +260,9 @@ test("X3: the guided demo ticks each step only when it really happened", () => {
   advance({ hours: 25 - getSim().hour }); // midnight itself is processed one tick later
   assert.equal(guideDone(snapshot())[5], true, "rent earned");
 });
+
+test("m8: no hard-coded '→' between values in components (it points backwards in Arabic; use <To />)", () => {
+  const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((f) => (f.isDirectory() ? walk(path.join(d, f.name)) : f.name.endsWith(".tsx") ? [path.join(d, f.name)] : []));
+  const bad = walk("components").filter((f) => /<\/span>\s*→\s*<span|join\(" → "\)/.test(fs.readFileSync(f, "utf8")));
+  assert.deepEqual(bad, []);
+});
