@@ -17,7 +17,7 @@ const store = { get: (k: string) => { try { return localStorage.getItem(k); } ca
 export default function DemoGuide({ onClose }: { onClose: () => void }) {
   const { T, N, setSection } = useApp();
   const [i, setI] = useState(() => Math.min(STEPS.length - 1, Math.max(0, Number(store.get("ss-demo-step")) || 0)));
-  const [small, setSmall] = useState(false);
+  const [small, setSmall] = useState(() => typeof window !== "undefined" && window.innerWidth < 640); // on a phone it starts as a small pill
   useEffect(() => { store.set("ss-demo-step", String(i)); }, [i]);
 
   // what has really happened (lib/guide.ts)
