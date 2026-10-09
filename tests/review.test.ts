@@ -20,6 +20,7 @@ import { snapshot } from "../lib/snapshot";
 import { listWindow } from "../lib/space/actions";
 import { createSpaceRequest } from "../lib/decisions";
 import { getSim } from "../lib/core";
+import { settingsTableBlock, replaceSettingsTable } from "../lib/settings-table";
 
 const file = path.join(os.tmpdir(), `smartstock-review-${process.pid}.db`);
 const q = <T = any>(sql: string, ...a: unknown[]) => db().prepare(sql).all(...a) as T[];
@@ -116,4 +117,11 @@ test("m1: the zone-over-capacity alert has its if-ignored message, so the Alerts
   alertAgent("t", "test");
   assert.equal(q(`SELECT COUNT(*) n FROM alerts WHERE kind='SPACE_OVER' AND active=1`)[0].n, 1);
   assert.deepEqual(alertsVerify().filter((c) => !c.ok), []);
+});
+
+test("m2: the settings table of README.md is the one generated from config/defaults.json", () => {
+  const doc = fs.readFileSync("README.md", "utf8").split(String.fromCharCode(13)).join(""); // CRLF checkouts
+  const next = replaceSettingsTable(doc, settingsTableBlock(defaultSettings()));
+  assert.ok(next !== null, "markers present");
+  assert.equal(next, doc, "run npm run docs:agents");
 });
