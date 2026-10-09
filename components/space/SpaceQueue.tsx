@@ -101,7 +101,6 @@ const ConflictCard = memo(function ConflictCard({ c }: { c: Conflict }) {
   const { T, R, DT, DUR, spaceAct, setSection } = useApp();
   const busy = useBusy();
   const tick = useSnap((s) => s.sim.tick);
-  const min = useSnap((s) => s.space.settings.min_block);
   const d = c.driver;
   const act = (action: string, area?: number, msg?: string) => spaceAct(`/api/space/listings/${c.listing_id}`, { action, area }, { k: msg ?? "toast.sp.listing_changed", v: { zone: c.zone_id, area: area ?? c.rest } });
   return (
@@ -117,7 +116,7 @@ const ConflictCard = memo(function ConflictCard({ c }: { c: Conflict }) {
         <Row k="dc.ignore" tone="rounded-md bg-high-soft/60 px-2 py-1">{T("sp.conflict.ignore")}</Row>
       </dl>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Btn tone="ok" size="lg" disabled={busy || c.ok_area < min} className="grow sm:grow-0" onClick={() => act("shrink", c.ok_area)}>{R({ k: "sp.btn.shrink", v: { area: c.ok_area } })}</Btn>
+        {c.can_shrink && <Btn tone="ok" size="lg" disabled={busy} className="grow sm:grow-0" onClick={() => act("shrink", c.shrink_to)}>{R({ k: "sp.btn.shrink", v: { area: c.shrink_to } })}</Btn>}
         <Btn disabled={busy} onClick={() => act("pause")}>{T("sp.btn.pause")}</Btn>
         <Btn tone="bad" disabled={busy} onClick={() => act("withdraw")}>{T("sp.btn.withdraw")}</Btn>
         <button type="button" onClick={() => setSection("purchasing")} className="min-h-10 px-2 text-sm font-semibold text-brand hover:underline">{T("sp.conflict.go_buy")}</button>

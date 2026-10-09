@@ -17,7 +17,8 @@ import { decide, postpone, editQty, manualMovement } from "../lib/decisions";
 import { handle } from "../lib/api";
 import { advance } from "../lib/sim";
 import { snapshot } from "../lib/snapshot";
-import { listWindow } from "../lib/space/actions";
+import { listWindow, listingAction } from "../lib/space/actions";
+import { addDays } from "../lib/time";
 import { createSpaceRequest } from "../lib/decisions";
 import { getSim } from "../lib/core";
 import { settingsTableBlock, replaceSettingsTable } from "../lib/settings-table";
@@ -124,4 +125,27 @@ test("m2: the settings table of README.md is the one generated from config/defau
   const next = replaceSettingsTable(doc, settingsTableBlock(defaultSettings()));
   assert.ok(next !== null, "markers present");
   assert.equal(next, doc, "run npm run docs:agents");
+});
+
+test("M5: the conflict card of a partly leased listing offers a shrink that keeps the leased part, and the server accepts it", () => {
+  fresh();
+  const w = snapshot().space.windows.filter((x) => x.state === "NEW").sort((a, b) => b.area - a.area)[0];
+  const { listingId } = listWindow({ zone_id: w.zone_id, area: w.area, start_date: w.start, end_date: w.suggest.end, price: 4, publish: true });
+  const leased = Math.floor((w.area * 0.6) / 10) * 10;
+  db().prepare(`INSERT INTO space_leases(offer_id,listing_id,request_id,company,zone_id,area,start_date,end_date,price,status,signed_tick,income,income_days) VALUES(0,?,'T','Test Co',?,?,?,?,4,'RESERVED',0,0,0)`)
+    .run(listingId, w.zone_id, leased, w.start, w.suggest.end);
+  // an approved order that needs the rest of the listing (and more) for the whole period
+  const it = q(`SELECT * FROM items WHERE zone_id=? ORDER BY space_m2_per_unit DESC LIMIT 1`, w.zone_id)[0];
+  db().prepare(`INSERT INTO purchase_orders_open(po_id,item_id,supplier_id,quantity,order_date,expected_arrival,status,source,received_date,expected_hour,ordered_tick,received_tick,emergency,premium,rec_key)
+    VALUES('TEST-SQUEEZE',?,?,?,?,?,'OPEN','AGENT',NULL,12,0,NULL,0,0,NULL)`).run(it.item_id, it.supplier_id, Math.ceil(5000 / it.space_m2_per_unit), getSim().sim_date, addDays(w.start, -3));
+  runAll({ group: "t", trigger: "decision" });
+  const c = snapshot().space.conflicts.find((x) => x.listing_id === listingId);
+  assert.ok(c, "the squeezed listing is flagged");
+  assert.equal(c.shrink_to, leased + c.ok_area, "shrink target = leased part + what still fits");
+  assert.ok(c.shrink_to >= leased);
+  assert.ok(c.can_shrink, JSON.stringify(c));
+  {
+    listingAction(listingId, "shrink", c.shrink_to);
+    assert.equal(q(`SELECT area FROM space_listings WHERE id=?`, listingId)[0].area, c.shrink_to);
+  }
 });
