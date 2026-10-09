@@ -124,6 +124,7 @@ export function postpone(id: number, untilTick?: number) {
     audit(rec.kind, { rec, decision: "POSTPONED", detail: { effect: "none", until: s.tick + hours } });
     logEvent("POSTPONED", rec.item_id, M("ev.postponed", { what: rec.kind, item: rec.item_id ?? "", req: rec.request_id ?? "", hours }), "info", { ref: rec.key, actor: "user" });
   })();
+  runAll({ group: `${s.tick}#postpone`, trigger: "decision" }); // every decision of the manager re-runs the agents (the overdue alert goes at once)
 }
 
 /** Undo an approval / rejection while its effects can still be reversed (PO not received yet, no later change of the same lease ...). */
@@ -172,6 +173,7 @@ export function editQty(id: number, qty: number) {
     audit("PO_EDIT", { rec, decision: "EDIT_QTY", detail: { before, after: q } });
     logEvent("PO_EDITED", rec.item_id, M("ev.po_edited", { item: rec.item_id, from: before, to: q, unit: p.unit }), "info", { ref: rec.key, actor: "user" });
   })();
+  runAll({ group: `${getSim().tick}#edit`, trigger: "decision" }); // funding, room and the plan are judged again on the new quantity
 }
 
 /** Manual (e.g. emergency) purchase order draft; it goes through the same approval and the same budget. */
@@ -244,6 +246,7 @@ export function createSpaceRequest(o: { company: string; type: string; area: num
     audit("SPACE_REQUEST_NEW", { req: id, decision: "CREATE", detail: o });
     logEvent("SPACE_REQUEST", null, M("ev.space_request", { req: id, company: o.company, area: o.area, from: o.from }), "info", { ref: id, actor: "user" });
   })();
+  runAll({ group: `${s.tick}#manual`, trigger: "manual" });
   return id;
 }
 

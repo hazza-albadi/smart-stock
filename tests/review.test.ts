@@ -97,3 +97,12 @@ test("M1: a company that turns up after a listing was published gets a visible o
   assert.equal(o[0].status, "PENDING", "the offer is waiting for the manager, not already expired");
   assert.ok(o[0].arrived_tick >= now - 1 && o[0].valid_until_tick === o[0].arrived_tick + 24, JSON.stringify(o[0]));
 });
+
+test("M3: postponing, editing a quantity and adding a company request re-run all five agents at once", () => {
+  fresh();
+  const runs = () => q(`SELECT COUNT(*) n FROM agent_runs`)[0].n as number;
+  const [a, b] = q(`SELECT id FROM recommendations WHERE status='PENDING' AND kind='PO' ORDER BY id LIMIT 2`);
+  let n = runs(); postpone(a.id); assert.equal(runs() - n, 5, "postpone");
+  n = runs(); editQty(b.id, 10); assert.equal(runs() - n, 5, "edit quantity");
+  n = runs(); createSpaceRequest({ company: "New Co", type: "general", area: 150, months: 2, from: "2026-11-01" }); assert.equal(runs() - n, 5, "company request");
+});
